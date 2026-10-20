@@ -1,0 +1,6 @@
+{
+  "name": "کارت ویزیت هوشمند رویا طرح داخلی",
+  "description": "کارت ویزیت دیجیتال و هوشمند کارمندان شرکت رویا طرح داخلی با پشتیبانی از NFC، QR Code و ذخیره مستقیم در مخاطبین",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,366 @@
+import React, { useState } from 'react';
+import { 
+  X, 
+  Radio, 
+  Smartphone, 
+  CheckCircle2, 
+  AlertCircle, 
+  RefreshCw, 
+  Cpu, 
+  Layers, 
+  Download, 
+  Copy, 
+  Check, 
+  FileSpreadsheet, 
+  Lock, 
+  ShieldCheck, 
+  ExternalLink 
+} from 'lucide-react';
+import { EmployeeProfile } from '../types';
+import { isWebNfcSupported, writeUrlToNfc } from '../utils/nfc';
+import { copyToClipboard as universalCopy } from '../utils/clipboard';
+import { getDirectCardUrl } from '../utils/url';
+
+interface NfcModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  profile: EmployeeProfile;
+  allProfiles?: EmployeeProfile[];
+}
+
+export const NfcModal: React.FC<NfcModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  profile,
+  allProfiles = [] 
+}) => {
+  const [activeTab, setActiveTab] = useState<'single' | 'bulk' | 'guide'>('single');
+  const [isWriting, setIsWriting] = useState(false);
+  const [statusText, setStatusText] = useState('');
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [selectedChip, setSelectedChip] = useState<'ntag213' | 'ntag215' | 'ntag216'>('ntag213');
+
+  if (!isOpen) return null;
+
+  // Exact standalone card URL
+  const directCardUrl = getDirectCardUrl(profile);
+  const webNfcAvailable = isWebNfcSupported();
+
+  const handleWriteNfc = async () => {
+    setIsWriting(true);
+    setResult(null);
+    setStatusText('لطفاً کارت یا برچسب NFC را به پشت گوشی نزدیک کنید...');
+
+    const res = await writeUrlToNfc(directCardUrl, (status) => {
+      setStatusText(status);
+    });
+
+    setIsWriting(false);
+    setResult(res);
+  };
+
+  const copyToClipboard = async (text: string, key: string) => {
+    const ok = await universalCopy(text);
+    if (ok) {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    }
+  };
+
+  // Export Bulk NFC CSV for mass card encoding
+  const handleExportBulkCsv = () => {
+    const list = allProfiles.length > 0 ? allProfiles : [profile];
+    const headers = ['ID', 'Name', 'Title', 'Phone', 'NFC_Target_URL'];
+    const rows = list.map((p) => [
+      p.id,
+      `"${p.name.replace(/"/g, '""')}"`,
+      `"${p.title.replace(/"/g, '""')}"`,
+      p.mobile || '',
+      `"${getDirectCardUrl(p)}"`
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `roya_nfc_batch_urls_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+      <div 
+        className="bg-slate-900 text-slate-100 w-full max-w-2xl rounded-3xl shadow-2xl relative border border-slate-700/80 max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-800 bg-slate-950/60">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+              <Radio className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-white flex items-center gap-2">
+                <span>فاز ۵: مرکز برنامه‌ریزی و رایت چیپ NFC</span>
+                <span className="text-[10px] bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">
+                  NTAG 213/215/216
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                برنامه‌ریزی تکی با موبایل و خروجی دسته‌جمعی برای چاپ و رایت فله‌ای کارت‌ها
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={onClose}
+            className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Tab switcher */}
+        <div className="flex items-center gap-1.5 p-2 bg-slate-950/80 border-b border-slate-800 text-xs overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('single')}
+            className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all ${
+              activeTab === 'single'
+                ? 'bg-amber-500 text-slate-950 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>رایت آنلاین با موبایل ({profile.name})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('bulk')}
+            className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all ${
+              activeTab === 'bulk'
+                ? 'bg-amber-500 text-slate-950 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>خروجی گروهی چاپ و کدگذاری ({allProfiles.length || 1} پرسنل)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('guide')}
+            className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all ${
+              activeTab === 'guide'
+                ? 'bg-amber-500 text-slate-950 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>راهنمای خرید و قفل‌گذاری چیپ</span>
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+          {/* TAB 1: SINGLE WRITER */}
+          {activeTab === 'single' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    لینک مستقیم کارت هوشمند {profile.name}:
+                  </span>
+                  <button
+                    onClick={() => copyToClipboard(directCardUrl, 'direct-url')}
+                    className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1"
+                  >
+                    {copiedKey === 'direct-url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedKey === 'direct-url' ? 'کپی شد!' : 'کپی لینک'}</span>
+                  </button>
+                </div>
+                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs font-mono text-amber-300 select-all break-all" dir="ltr">
+                  {directCardUrl}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                    <Cpu className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-sm text-white">رایت فوری با پروتکل Web NFC</h4>
+                    <p className="text-xs text-slate-300 mt-0.5">
+                      {webNfcAvailable 
+                        ? 'مرورگر شما از Web NFC پشتیبانی می‌کند. روی دکمه زیر کلیک کرده و چیپ را نزدیک کنید.'
+                        : 'برای رایت در اندروید از مرورگر Chrome و در آیفون/اندروید از اپلیکیشن رایگان NFC Tools استفاده فرمایید.'}
+                    </p>
+                  </div>
+                </div>
+
+                {webNfcAvailable ? (
+                  <div className="pt-2">
+                    <button
+                      onClick={handleWriteNfc}
+                      disabled={isWriting}
+                      className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-md shadow-amber-500/10 transition-all disabled:opacity-50 cursor-pointer"
+                    >
+                      {isWriting ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                          <span>در حال انتظار برای نزدیک کردن چیپ NFC...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Radio className="w-4 h-4 text-slate-950" />
+                          <span>شروع رایت تگ NFC برای {profile.name}</span>
+                        </>
+                      )}
+                    </button>
+                    {statusText && isWriting && (
+                      <p className="text-xs text-center text-amber-400 font-medium mt-2.5 animate-pulse">
+                        {statusText}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 text-xs text-amber-300 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+                    <span>
+                      جهت رایت مستقیم روی تگ، مرورگر <strong className="text-white">Google Chrome در اندروید</strong> را باز کنید یا لینک بالا را در اپلیکیشن <strong className="text-white">NFC Tools</strong> کپی و گزینه <em>Write → Add a record → URL</em> را انتخاب نمایید.
+                    </span>
+                  </div>
+                )}
+
+                {result && (
+                  <div className={`p-3 rounded-xl text-xs flex items-start gap-2 ${result.success ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'}`}>
+                    {result.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    )}
+                    <span>{result.message}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: BULK ENCODING & PRINTING */}
+          {activeTab === 'bulk' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-white">جدول لینک‌های NFC تمام پرسنل رویا</h4>
+                  <p className="text-[11px] text-slate-400">مناسب برای ارسال به چاپخانه کارت‌های هوشمند PVC یا دستگاه‌های رایت چندتایی</p>
+                </div>
+                <button
+                  onClick={handleExportBulkCsv}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/10 transition-colors cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>دانلود فایل اکسل / CSV</span>
+                </button>
+              </div>
+
+              <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden max-h-60 overflow-y-auto">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-800/80 text-slate-300 text-[11px] border-b border-slate-700/60 sticky top-0">
+                    <tr>
+                      <th className="p-2.5">نام کارمند</th>
+                      <th className="p-2.5">سمت سازمانی</th>
+                      <th className="p-2.5">لینک مستقیم NFC</th>
+                      <th className="p-2.5 text-center">کپی</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                    {(allProfiles.length > 0 ? allProfiles : [profile]).map((p) => {
+                      const url = getDirectCardUrl(p);
+                      return (
+                        <tr key={p.id} className="hover:bg-slate-900/80">
+                          <td className="p-2.5 font-bold text-white">{p.name}</td>
+                          <td className="p-2.5 text-slate-400 text-[11px]">{p.title}</td>
+                          <td className="p-2.5 font-mono text-[10.5px] text-amber-300 max-w-[180px] truncate" dir="ltr">
+                            {url}
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <button
+                              onClick={() => copyToClipboard(url, `bulk-${p.id}`)}
+                              className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white"
+                              title="کپی لینک"
+                            >
+                              {copiedKey === `bulk-${p.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: HARDWARE & CHIP GUIDE */}
+          {activeTab === 'guide' && (
+            <div className="space-y-3.5 text-xs text-slate-300">
+              <div className="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60 space-y-3">
+                <h4 className="font-bold text-sm text-white flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-amber-400" />
+                  راهنمای انتخاب چیپ مناسب برای کارت‌های شرکت رویا:
+                </h4>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  <div className="p-3 bg-slate-900/90 rounded-xl border border-amber-500/30">
+                    <div className="font-bold text-amber-400 text-xs">NTAG213 (پیشنهادی)</div>
+                    <div className="text-[11px] text-slate-400 mt-1">حجم: ۱۴۴ بایت</div>
+                    <div className="text-[10.5px] text-slate-300 mt-1">قیمت اقتصادی، سرعت اسکن فوق‌العاده بالا، کاملاً متناسب با لینک کارت رویا</div>
+                  </div>
+
+                  <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-700">
+                    <div className="font-bold text-slate-200 text-xs">NTAG215</div>
+                    <div className="text-[11px] text-slate-400 mt-1">حجم: ۵۰۴ بایت</div>
+                    <div className="text-[10.5px] text-slate-300 mt-1">پشتیبانی کامل از لینک‌های بلند و اطلاعات اضافی vCard</div>
+                  </div>
+
+                  <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-700">
+                    <div className="font-bold text-slate-200 text-xs">NTAG216</div>
+                    <div className="text-[11px] text-slate-400 mt-1">حجم: ۸۸۸ بایت</div>
+                    <div className="text-[10.5px] text-slate-300 mt-1">بیشترین حجم حافظه برای ذخیره مستقیم مخاطب آفلاین روی چیپ</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-800/40 rounded-2xl border border-slate-700/40 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-slate-200">
+                  <Lock className="w-4 h-4 text-emerald-400" />
+                  <span>توصیه امنیتی مهم: قفل‌گذاری چیپ (Lock Tag)</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  پس از رایت لینک روی کارت ویزیت فیزیکی پرسنل، می‌توانید از گزینه <strong className="text-white">Lock / Read-Only</strong> در اپلیکیشن NFC Tools یا دستگاه رایت استفاده کنید تا هیچ فرد دیگری نتواند اطلاعات یا لینک روی کارت را بازنویسی یا پاک کند.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between">
+          <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>سازگار با انواع گوشی‌های اپل آیفون و اندروید</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="py-2 px-5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-medium text-xs transition-colors border border-slate-700 cursor-pointer"
+          >
+            بستن
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};

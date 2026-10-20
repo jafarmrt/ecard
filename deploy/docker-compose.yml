@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  roya-card:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: roya-smart-nfc-card
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - ADMIN_PASSWORD=roya1403
+    volumes:
+      # ذخیره‌سازی دائمی پایگاه داده و تصاویر بارگذاری شده روی هاست
+      - roya_card_data:/app/data
+      - roya_card_uploads:/app/public/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  roya_card_data:
+    driver: local
+  roya_card_uploads:
+    driver: local

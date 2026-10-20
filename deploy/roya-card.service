@@ -1,0 +1,27 @@
+[Unit]
+Description=Roya Smart NFC Business Card Server Daemon
+Documentation=https://card.royainterior.com
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/roya-card
+ExecStart=/usr/bin/node dist/server.cjs
+Restart=always
+RestartSec=5
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=roya-card
+
+# متغیرهای محیطی سیستم
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=ADMIN_PASSWORD=roya1403
+
+# محدودیت‌های امنیتی لینوکس
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="96" fill="#0f172a" />
+  <circle cx="256" cy="256" r="220" fill="#1e293b" stroke="#D0192A" stroke-width="8" stroke-dasharray="12 12" opacity="0.6"/>
+  
+  <!-- Roya Red Logo Box -->
+  <rect x="80" y="80" width="352" height="352" rx="48" fill="#ffffff" />
+  
+  <g transform="translate(96, 120) scale(1.0)">
+    <g fill="#D0192A">
+      <!-- R -->
+      <path d="M 28 32 L 58 32 C 74 32 85 42 85 57 C 85 70 75 78 62 80.5 L 87 108 L 69 108 L 47 84 L 43 84 L 43 108 L 28 108 Z M 43 46 L 43 72 L 56 72 C 66 72 70 66 70 59 C 70 52 66 46 56 46 Z" />
+      <!-- O -->
+      <path d="M 125 30 C 146 30 159 47 159 70 C 159 93 146 110 125 110 C 104 110 91 93 91 70 C 91 47 104 30 125 30 Z M 125 44 C 114 44 106.5 55 106.5 70 C 106.5 85 114 96 125 96 C 136 96 143.5 85 143.5 70 C 143.5 55 136 44 125 44 Z" />
+      <!-- Y -->
+      <path d="M 166 32 L 183 32 L 198 68 L 213 32 L 230 32 L 206 80 L 206 108 L 190 108 L 190 80 Z" />
+      <!-- A -->
+      <path d="M 235 108 L 261 32 L 277 32 L 303 108 L 287 108 L 269 55 L 251 108 Z" />
+    </g>
+    <!-- Surface Center -->
+    <text x="160" y="145" text-anchor="middle" fill="#D0192A" font-size="28" font-family="'Times New Roman', Georgia, serif" font-weight="700" letter-spacing="0.05em">Surface Center</text>
+    <!-- NFC & Smart Card badge -->
+    <rect x="70" y="175" width="180" height="34" rx="17" fill="#0f172a" />
+    <text x="160" y="198" text-anchor="middle" fill="#f59e0b" font-size="14" font-family="sans-serif" font-weight="bold">SMART NFC CARD</text>
+  </g>
+</svg>
