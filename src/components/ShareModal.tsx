@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Share2, Copy, Check, Download, MessageCircle, Send, Smartphone, ExternalLink, QrCode } from 'lucide-react';
+import { X, Copy, Check, Download, MessageCircle, Send, Smartphone, ExternalLink, QrCode, IdCard } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { EmployeeProfile } from '../types';
 import { shareContact } from '../utils/vcard';
@@ -20,6 +20,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, profile
 
   // Exact standalone card URL (showing exclusively the mobile business card view)
   const directCardUrl = getDirectCardUrl(profile);
+  const trackedQrUrl = `${directCardUrl}?src=qr`;
 
   const handleCopyLink = async () => {
     const ok = await copyToClipboard(directCardUrl);
@@ -33,17 +34,98 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, profile
     shareContact(profile);
   };
 
-  const downloadQrPng = () => {
+  const downloadRawQrPng = () => {
     const canvas = qrRef.current?.querySelector('canvas');
     if (canvas) {
       const pngUrl = canvas.toDataURL('image/png');
       const downloadLink = document.createElement('a');
       downloadLink.href = pngUrl;
-      downloadLink.download = `QR_${profile.name.replace(/\s+/g, '_')}_Roya_Card.png`;
+      downloadLink.download = `QR_Raw_${profile.slug || profile.id}_Roya.png`;
       document.body.appendChild(downloadLink);
       downloadLink.click();
       document.body.removeChild(downloadLink);
     }
+  };
+
+  // Generate a high-resolution Printable PVC / Social Badge with QR, Name, Title & Brand
+  const downloadBrandedBadgePng = () => {
+    const qrCanvas = qrRef.current?.querySelector('canvas');
+    if (!qrCanvas) return;
+
+    const badgeCanvas = document.createElement('canvas');
+    const width = 800;
+    const height = 1040;
+    badgeCanvas.width = width;
+    badgeCanvas.height = height;
+    const ctx = badgeCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // Background
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, width, height);
+
+    // Top Red Accent Bar
+    ctx.fillStyle = '#D0192A';
+    ctx.fillRect(0, 0, width, 24);
+
+    // Subtle Outer Border
+    ctx.strokeStyle = '#E7E5E4';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(24, 44, width - 48, height - 68);
+
+    // Brand Title
+    ctx.fillStyle = '#D0192A';
+    ctx.font = '900 44px Vazirmatn, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('ROYA', width / 2, 130);
+
+    ctx.fillStyle = '#57534E';
+    ctx.font = '600 20px Vazirmatn, sans-serif';
+    ctx.fillText('شرکت رویا طرح داخلی', width / 2, 170);
+
+    // QR Code Frame
+    const qrBoxSize = 460;
+    const qrX = (width - qrBoxSize) / 2;
+    const qrY = 215;
+
+    ctx.fillStyle = '#FAFAF9';
+    ctx.fillRect(qrX - 20, qrY - 20, qrBoxSize + 40, qrBoxSize + 40);
+    ctx.strokeStyle = '#D6D3D1';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(qrX - 20, qrY - 20, qrBoxSize + 40, qrBoxSize + 40);
+
+    ctx.drawImage(qrCanvas, qrX, qrY, qrBoxSize, qrBoxSize);
+
+    // Employee Name
+    ctx.fillStyle = '#1C1917';
+    ctx.font = '900 42px Vazirmatn, sans-serif';
+    ctx.fillText(profile.name, width / 2, 765);
+
+    // Red Divider
+    ctx.fillStyle = '#D0192A';
+    ctx.fillRect(width / 2 - 45, 790, 90, 5);
+
+    // Employee Title
+    ctx.fillStyle = '#57534E';
+    ctx.font = '600 26px Vazirmatn, sans-serif';
+    ctx.fillText(profile.title, width / 2, 840);
+
+    // Mobile & Direct Slug
+    ctx.fillStyle = '#292524';
+    ctx.font = '700 26px monospace';
+    ctx.fillText(profile.mobile || '', width / 2, 895);
+
+    ctx.fillStyle = '#78716C';
+    ctx.font = '500 20px monospace';
+    ctx.fillText(directCardUrl.replace(/^https?:\/\//, ''), width / 2, 945);
+
+    const pngUrl = badgeCanvas.toDataURL('image/png');
+    const downloadLink = document.createElement('a');
+    downloadLink.href = pngUrl;
+    downloadLink.download = `Roya_Card_QR_${profile.slug || profile.id}.png`;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
   };
 
   const shareText = encodeURIComponent(`کارت ویزیت دیجیتال ${profile.name} (${profile.title} شرکت رویا طرح داخلی):\n${directCardUrl}`);
@@ -67,7 +149,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, profile
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -78,45 +160,53 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, profile
           <div className="p-5 bg-slate-800/80 rounded-2xl border border-slate-700/80 flex flex-col items-center justify-center">
             <div ref={qrRef} className="p-4 bg-white rounded-2xl shadow-lg border border-slate-700">
               <QRCodeCanvas 
-                value={directCardUrl}
-                size={196}
+                value={trackedQrUrl}
+                size={240}
                 level="H"
                 marginSize={1}
                 imageSettings={{
                   src: '/favicon.png',
-                  height: 36,
-                  width: 36,
+                  height: 44,
+                  width: 44,
                   excavate: true,
                 }}
               />
             </div>
             
             <div className="mt-3 text-center">
-              <p className="text-xs font-bold text-white">کیوآرکد مستقیم محتوای کارت ویزیت</p>
+              <p className="text-xs font-bold text-white">کیوآرکد مستقیم محتوای کارت ویزیت (مجهز به ردیاب اسکن)</p>
               <p className="text-[11px] text-amber-400 font-medium mt-0.5">
-                اسکن این کد صرفاً کادر کارت ویزیت موبایلی را بدون ابزار‌های مدیریتی باز می‌کند.
+                اسکن این کد مستقیماً کارت ویزیت موبایلی را باز کرده و در آمار اسکن QR ثبت می‌شود.
               </p>
             </div>
             
-            <div className="mt-3.5 flex flex-col sm:flex-row items-center gap-2 w-full">
+            <div className="mt-3.5 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
               <button
-                onClick={downloadQrPng}
-                className="w-full py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md transition-colors cursor-pointer"
+                onClick={downloadBrandedBadgePng}
+                className="w-full py-2.5 px-3 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md transition-colors cursor-pointer"
               >
-                <Download className="w-4 h-4" />
-                <span>دانلود فایل تصویر بارکد (PNG)</span>
+                <IdCard className="w-4 h-4 shrink-0" />
+                <span>دانلود کارت بارکد نام‌دار (PNG)</span>
               </button>
-              
-              <a
-                href={directCardUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-2.5 px-3 bg-slate-900 hover:bg-slate-950 border border-slate-700 text-slate-300 text-xs font-medium rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+
+              <button
+                onClick={downloadRawQrPng}
+                className="w-full py-2.5 px-3 bg-slate-900 hover:bg-slate-950 border border-slate-700 text-slate-200 text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
-                <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
-                <span>تست و بازکردن لینک</span>
-              </a>
+                <Download className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>دانلود بارکد خام (چاپخانه)</span>
+              </button>
             </div>
+
+            <a
+              href={directCardUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 w-full py-2 px-3 bg-slate-900/70 hover:bg-slate-950 border border-slate-700/80 text-slate-300 text-xs font-medium rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
+              <span>تست و بازکردن لینک مستقیم کارت</span>
+            </a>
           </div>
 
           {/* Copy Direct Card Link Input */}

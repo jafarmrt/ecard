@@ -513,13 +513,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 />
               </div>
 
-              <button
-                onClick={onOpenNewProfileModal}
-                className="w-full sm:w-auto py-2.5 px-4 bg-amber-500 hover:bg-amber-400 active:scale-98 text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
-              >
-                <Plus className="w-4 h-4 stroke-[2.5]" />
-                <span>افزودن کارشناس جدید</span>
-              </button>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  onClick={onOpenNfcModal}
+                  className="flex-1 sm:flex-initial py-2.5 px-3.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  title="دریافت فایل اکسل چاپخانه و شیت بارکدهای QR تمام پرسنل"
+                >
+                  <QrCode className="w-4 h-4 text-amber-400" />
+                  <span>خروجی چاپخانه (NFC و QR)</span>
+                </button>
+
+                <button
+                  onClick={onOpenNewProfileModal}
+                  className="flex-1 sm:flex-initial py-2.5 px-4 bg-amber-500 hover:bg-amber-400 active:scale-98 text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+                >
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
+                  <span>افزودن کارشناس جدید</span>
+                </button>
+              </div>
             </div>
 
             {/* Profiles Grid / List */}
@@ -851,6 +862,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <th className="p-3 text-center">واتساپ</th>
                       <th className="p-3 text-center">دانلود کاتالوگ</th>
                       <th className="p-3 text-center">دانلود مخاطب</th>
+                      <th className="p-3 text-center">سرنخ مشتری</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800 text-slate-200">
@@ -881,6 +893,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <td className="p-3 text-center font-mono font-bold text-emerald-300">{an.whatsappClicks || 0}</td>
                           <td className="p-3 text-center font-mono font-bold text-amber-300">{an.catalogDownloads || 0}</td>
                           <td className="p-3 text-center font-mono font-bold text-purple-400">{an.vcardDownloads || 0}</td>
+                          <td className="p-3 text-center font-mono font-bold text-teal-400">{an.leadCaptures || 0}</td>
                         </tr>
                       );
                     })}

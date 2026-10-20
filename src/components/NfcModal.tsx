@@ -14,12 +14,14 @@ import {
   FileSpreadsheet, 
   Lock, 
   ShieldCheck, 
-  ExternalLink 
+  QrCode,
+  Printer
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { EmployeeProfile } from '../types';
 import { isWebNfcSupported, writeUrlToNfc } from '../utils/nfc';
 import { copyToClipboard as universalCopy } from '../utils/clipboard';
-import { getDirectCardUrl } from '../utils/url';
+import { getDirectCardUrl, getBaseOrigin } from '../utils/url';
 
 interface NfcModalProps {
   isOpen: boolean;
@@ -34,25 +36,27 @@ export const NfcModal: React.FC<NfcModalProps> = ({
   profile,
   allProfiles = [] 
 }) => {
-  const [activeTab, setActiveTab] = useState<'single' | 'bulk' | 'guide'>('single');
+  const [activeTab, setActiveTab] = useState<'single' | 'bulk' | 'qr-sheet' | 'guide'>('single');
   const [isWriting, setIsWriting] = useState(false);
   const [statusText, setStatusText] = useState('');
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [selectedChip, setSelectedChip] = useState<'ntag213' | 'ntag215' | 'ntag216'>('ntag213');
+  const [includeNfcTrackingParam, setIncludeNfcTrackingParam] = useState<boolean>(true);
 
   if (!isOpen) return null;
 
-  // Exact standalone card URL
-  const directCardUrl = getDirectCardUrl(profile);
+  const baseCardUrl = getDirectCardUrl(profile);
+  const nfcTargetUrl = includeNfcTrackingParam ? `${baseCardUrl}?src=nfc` : baseCardUrl;
   const webNfcAvailable = isWebNfcSupported();
+  const origin = getBaseOrigin();
+  const staffList = allProfiles.length > 0 ? allProfiles : [profile];
 
   const handleWriteNfc = async () => {
     setIsWriting(true);
     setResult(null);
     setStatusText('لطفاً کارت یا برچسب NFC را به پشت گوشی نزدیک کنید...');
 
-    const res = await writeUrlToNfc(directCardUrl, (status) => {
+    const res = await writeUrlToNfc(nfcTargetUrl, (status) => {
       setStatusText(status);
     });
 
@@ -68,33 +72,57 @@ export const NfcModal: React.FC<NfcModalProps> = ({
     }
   };
 
-  // Export Bulk NFC CSV for mass card encoding
+  // Export Bulk NFC & QR CSV for PVC Card Printing House
   const handleExportBulkCsv = () => {
-    const list = allProfiles.length > 0 ? allProfiles : [profile];
-    const headers = ['ID', 'Name', 'Title', 'Phone', 'NFC_Target_URL'];
-    const rows = list.map((p) => [
-      p.id,
-      `"${p.name.replace(/"/g, '""')}"`,
-      `"${p.title.replace(/"/g, '""')}"`,
-      p.mobile || '',
-      `"${getDirectCardUrl(p)}"`
-    ]);
+    const escapeCsv = (val?: string | number) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+    const headers = [
+      'ردیف',
+      'شناسه (ID)',
+      'نام و نام خانوادگی (فارسی)',
+      'نام انگلیسی (چاپ روی کارت)',
+      'سمت سازمانی',
+      'واحد سازمانی',
+      'شماره موبایل',
+      'لینک رایت چیپ NFC (همراه با ردیاب تپ)',
+      'لینک بارکد QR (همراه با ردیاب اسکن)',
+      'لینک مستقیم کارت',
+      'لینک دانلود مستقیم مخاطب (VCF)',
+    ];
 
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const rows = staffList.map((p, idx) => {
+      const cardBase = getDirectCardUrl(p);
+      const slugOrId = (p.slug || p.id).trim();
+      return [
+        escapeCsv(idx + 1),
+        escapeCsv(p.id),
+        escapeCsv(p.name),
+        escapeCsv(p.nameEn || ''),
+        escapeCsv(p.title),
+        escapeCsv(p.department || 'فروش'),
+        escapeCsv(p.mobile || ''),
+        escapeCsv(`${cardBase}?src=nfc`),
+        escapeCsv(`${cardBase}?src=qr`),
+        escapeCsv(cardBase),
+        escapeCsv(`${origin}/api/vcard/${slugOrId}`),
+      ];
+    });
+
+    const csvContent = '\uFEFF' + [headers.map(escapeCsv).join(','), ...rows.map((r) => r.join(','))].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `roya_nfc_batch_urls_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `roya_pvc_print_nfc_qr_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div 
-        className="bg-slate-900 text-slate-100 w-full max-w-2xl rounded-3xl shadow-2xl relative border border-slate-700/80 max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-slate-900 text-slate-100 w-full max-w-3xl rounded-3xl shadow-2xl relative border border-slate-700/80 max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -105,19 +133,19 @@ export const NfcModal: React.FC<NfcModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-white flex items-center gap-2">
-                <span>فاز ۵: مرکز برنامه‌ریزی و رایت چیپ NFC</span>
+                <span>مرکز برنامه‌ریزی NFC و خروجی چاپخانه کارت‌های PVC</span>
                 <span className="text-[10px] bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">
                   NTAG 213/215/216
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                برنامه‌ریزی تکی با موبایل و خروجی دسته‌جمعی برای چاپ و رایت فله‌ای کارت‌ها
+                رایت تکی با موبایل، فایل اکسل چاپخانه و شیت یکجای بارکدهای QR تمام پرسنل
               </p>
             </div>
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -127,7 +155,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
         <div className="flex items-center gap-1.5 p-2 bg-slate-950/80 border-b border-slate-800 text-xs overflow-x-auto">
           <button
             onClick={() => setActiveTab('single')}
-            className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'single'
                 ? 'bg-amber-500 text-slate-950 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -139,26 +167,38 @@ export const NfcModal: React.FC<NfcModalProps> = ({
 
           <button
             onClick={() => setActiveTab('bulk')}
-            className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'bulk'
                 ? 'bg-amber-500 text-slate-950 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
             }`}
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>خروجی گروهی چاپ و کدگذاری ({allProfiles.length || 1} پرسنل)</span>
+            <span>لیست اکسل چاپخانه ({staffList.length} نفر)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('qr-sheet')}
+            className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'qr-sheet'
+                ? 'bg-amber-500 text-slate-950 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <QrCode className="w-3.5 h-3.5" />
+            <span>شیت یکجای بارکدهای QR</span>
           </button>
 
           <button
             onClick={() => setActiveTab('guide')}
-            className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'guide'
                 ? 'bg-amber-500 text-slate-950 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>راهنمای خرید و قفل‌گذاری چیپ</span>
+            <span>راهنمای چیپ و قفل‌گذاری</span>
           </button>
         </div>
 
@@ -168,22 +208,31 @@ export const NfcModal: React.FC<NfcModalProps> = ({
           {activeTab === 'single' && (
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <span className="text-xs font-bold text-white flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                    لینک مستقیم کارت هوشمند {profile.name}:
+                    لینک رایت روی تگ NFC برای {profile.name}:
                   </span>
                   <button
-                    onClick={() => copyToClipboard(directCardUrl, 'direct-url')}
-                    className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1"
+                    onClick={() => copyToClipboard(nfcTargetUrl, 'direct-url')}
+                    className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 cursor-pointer"
                   >
                     {copiedKey === 'direct-url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedKey === 'direct-url' ? 'کپی شد!' : 'کپی لینک'}</span>
+                    <span>{copiedKey === 'direct-url' ? 'کپی شد!' : 'کپی لینک NFC'}</span>
                   </button>
                 </div>
                 <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs font-mono text-amber-300 select-all break-all" dir="ltr">
-                  {directCardUrl}
+                  {nfcTargetUrl}
                 </div>
+                <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={includeNfcTrackingParam}
+                    onChange={(e) => setIncludeNfcTrackingParam(e.target.checked)}
+                    className="rounded border-slate-700 text-amber-500 focus:ring-amber-400"
+                  />
+                  <span>افزودن پارامتر هوشمند <code className="text-amber-300 font-mono">?src=nfc</code> جهت شمارش دقیق تپ‌های فیزیکی NFC در داشبورد آمار</span>
+                </label>
               </div>
 
               <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-3">
@@ -249,50 +298,52 @@ export const NfcModal: React.FC<NfcModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: BULK ENCODING & PRINTING */}
+          {/* TAB 2: BULK ENCODING & PRINTING CSV */}
           {activeTab === 'bulk' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-xs font-bold text-white">جدول لینک‌های NFC تمام پرسنل رویا</h4>
-                  <p className="text-[11px] text-slate-400">مناسب برای ارسال به چاپخانه کارت‌های هوشمند PVC یا دستگاه‌های رایت چندتایی</p>
+                  <h4 className="text-xs sm:text-sm font-bold text-white">جدول جامع لینک‌های NFC و QR تمام پرسنل رویا</h4>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    مناسب برای تحویل به چاپخانه کارت‌های هوشمند PVC (شامل لینک‌های مجزای تپ NFC و اسکن QR)
+                  </p>
                 </div>
                 <button
                   onClick={handleExportBulkCsv}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/10 transition-colors cursor-pointer"
+                  className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md transition-colors cursor-pointer shrink-0"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>دانلود فایل اکسل / CSV</span>
+                  <Download className="w-4 h-4 stroke-[2.2]" />
+                  <span>دانلود شیت اکسل چاپخانه (CSV)</span>
                 </button>
               </div>
 
-              <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden max-h-60 overflow-y-auto">
+              <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden max-h-72 overflow-y-auto">
                 <table className="w-full text-right text-xs">
-                  <thead className="bg-slate-800/80 text-slate-300 text-[11px] border-b border-slate-700/60 sticky top-0">
+                  <thead className="bg-slate-800/90 text-slate-300 text-[11px] border-b border-slate-700/60 sticky top-0">
                     <tr>
-                      <th className="p-2.5">نام کارمند</th>
+                      <th className="p-2.5">نام کارشناس</th>
                       <th className="p-2.5">سمت سازمانی</th>
-                      <th className="p-2.5">لینک مستقیم NFC</th>
-                      <th className="p-2.5 text-center">کپی</th>
+                      <th className="p-2.5">لینک چیپ NFC</th>
+                      <th className="p-2.5 text-center">کپی NFC</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                    {(allProfiles.length > 0 ? allProfiles : [profile]).map((p) => {
-                      const url = getDirectCardUrl(p);
+                    {staffList.map((p) => {
+                      const nfcUrl = `${getDirectCardUrl(p)}?src=nfc`;
                       return (
                         <tr key={p.id} className="hover:bg-slate-900/80">
                           <td className="p-2.5 font-bold text-white">{p.name}</td>
                           <td className="p-2.5 text-slate-400 text-[11px]">{p.title}</td>
-                          <td className="p-2.5 font-mono text-[10.5px] text-amber-300 max-w-[180px] truncate" dir="ltr">
-                            {url}
+                          <td className="p-2.5 font-mono text-[10.5px] text-amber-300 max-w-[220px] truncate" dir="ltr">
+                            {nfcUrl}
                           </td>
                           <td className="p-2.5 text-center">
                             <button
-                              onClick={() => copyToClipboard(url, `bulk-${p.id}`)}
-                              className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white"
-                              title="کپی لینک"
+                              onClick={() => copyToClipboard(nfcUrl, `bulk-${p.id}`)}
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer"
+                              title="کپی لینک NFC"
                             >
-                              {copiedKey === `bulk-${p.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              {copiedKey === `bulk-${p.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                             </button>
                           </td>
                         </tr>
@@ -304,7 +355,74 @@ export const NfcModal: React.FC<NfcModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: HARDWARE & CHIP GUIDE */}
+          {/* TAB 3: BATCH QR CODE SHEET FOR PRINTING HOUSE */}
+          {activeTab === 'qr-sheet' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-white">شیت یکجای بارکدهای QR اختصاصی پرسنل</h4>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    تمامی بارکدها مجهز به لوگوی مرکزی رویا و پارامتر ردیاب اسکن (<code className="font-mono text-amber-300">?src=qr</code>) هستند
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExportBulkCsv}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>دانلود CSV لینک‌ها</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>چاپ / ذخیره PDF شیت</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 max-h-80 overflow-y-auto p-1">
+                {staffList.map((p) => {
+                  const qrUrl = `${getDirectCardUrl(p)}?src=qr`;
+                  return (
+                    <div
+                      key={p.id}
+                      className="p-3.5 bg-white text-stone-900 rounded-2xl border border-stone-200 flex flex-col items-center text-center shadow-sm"
+                    >
+                      <QRCodeSVG
+                        value={qrUrl}
+                        size={116}
+                        level="H"
+                        fgColor="#1C1917"
+                        bgColor="#FFFFFF"
+                        imageSettings={{
+                          src: '/favicon.png',
+                          height: 22,
+                          width: 22,
+                          excavate: true,
+                        }}
+                      />
+                      <span className="mt-2.5 text-xs font-black text-stone-900 truncate max-w-full">
+                        {p.name}
+                      </span>
+                      <span className="text-[10px] text-stone-500 truncate max-w-full mt-0.5">
+                        {p.title}
+                      </span>
+                      <span className="mt-1 text-[9.5px] font-mono text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100" dir="ltr">
+                        /{p.slug || p.id}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: HARDWARE & CHIP GUIDE */}
           {activeTab === 'guide' && (
             <div className="space-y-3.5 text-xs text-slate-300">
               <div className="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60 space-y-3">

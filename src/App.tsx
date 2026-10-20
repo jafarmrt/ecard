@@ -515,6 +515,7 @@ export default function App() {
           isOpen={isNfcModalOpen}
           onClose={() => setIsNfcModalOpen(false)}
           profile={currentProfile}
+          allProfiles={profiles}
         />
 
         <AdminLoginModal
