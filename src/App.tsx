@@ -243,10 +243,26 @@ export default function App() {
       });
     };
 
+    const handleAnalyticsUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        profileId: string;
+        analytics: EmployeeProfile['analytics'];
+      }>;
+      if (!customEvent.detail?.profileId || !customEvent.detail?.analytics) return;
+      const { profileId, analytics } = customEvent.detail;
+      setProfiles((prev) =>
+        prev.map((p) =>
+          p.id === profileId || p.slug === profileId ? { ...p, analytics } : p
+        )
+      );
+    };
+
     window.addEventListener('popstate', handlePopState);
+    window.addEventListener('roya:analytics-updated', handleAnalyticsUpdated);
     return () => {
       isMounted = false;
       window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('roya:analytics-updated', handleAnalyticsUpdated);
     };
   }, []);
 
@@ -276,9 +292,18 @@ export default function App() {
     // 1. Update UI state immediately for responsive feel
     setProfiles((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
     
-    // 2. Persist to server database
+    // 2. Persist to server database (which also offloads Base64 images to /uploads/images/)
     const res = await api.updateProfile(updated);
     if (res.success) {
+      if (res.profile) {
+        setProfiles((prev) => {
+          const next = prev.map((p) => (p.id === res.profile!.id ? res.profile! : p));
+          try {
+            localStorage.setItem('roya_employee_profiles', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+      }
       showToast('تغییرات با موفقیت در پایگاه داده سرور ذخیره شد.');
     } else {
       showToast(res.error || 'خطا در ذخیره در سرور');
@@ -314,6 +339,15 @@ export default function App() {
 
     const res = await api.createProfile(newProfile);
     if (res.success) {
+      if (res.profile) {
+        setProfiles((prev) => {
+          const next = prev.map((p) => (p.id === res.profile!.id ? res.profile! : p));
+          try {
+            localStorage.setItem('roya_employee_profiles', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+      }
       showToast('کارمند جدید با موفقیت به پایگاه داده سرور اضافه شد.');
     } else {
       showToast(res.error || 'خطا در ذخیره کارمند جدید روی سرور');
@@ -631,6 +665,12 @@ export default function App() {
                 onOpenNfcModal={() => setIsNfcModalOpen(true)}
                 onOpenDeployModal={() => setIsDeployModalOpen(true)}
                 onUpdateProfile={handleUpdateProfile}
+                onReplaceAllProfiles={(updatedList) => {
+                  setProfiles(updatedList);
+                  if (updatedList.length > 0 && !updatedList.some((p) => p.id === currentProfileId)) {
+                    setCurrentProfileId(updatedList[0].id);
+                  }
+                }}
                 onDeleteProfile={handleDeleteProfile}
                 onResetToDefault={handleResetToDefault}
                 onLogout={() => {

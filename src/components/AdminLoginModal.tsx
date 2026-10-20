@@ -112,27 +112,13 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   };
 
   const handleExportBackup = async () => {
-    const token = api.getAdminToken();
-    try {
-      const res = await fetch('/api/backup', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `roya-db-backup-${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        setSuccessMsg('فایل پشتیبان با موفقیت دانلود شد.');
-      } else {
-        setErrorMsg('خطا در دریافت پشتیبان از سرور');
-      }
-    } catch {
-      setErrorMsg('خطا در ارتباط با سرور');
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    const res = await api.downloadBackup();
+    if (res.success) {
+      setSuccessMsg('فایل پشتیبان با موفقیت دانلود شد.');
+    } else {
+      setErrorMsg(res.error || 'خطا در دریافت پشتیبان از سرور');
     }
   };
 

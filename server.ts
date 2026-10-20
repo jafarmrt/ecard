@@ -3,8 +3,98 @@ import path from 'path';
 import fs from 'fs';
 import rateLimit from 'express-rate-limit';
 import { createServer as createViteServer } from 'vite';
-import { db } from './src/server/db.ts';
+import { db, persistBase64ImageIfNeeded } from './src/server/db.ts';
 import { EmployeeProfile } from './src/types.ts';
+
+function escapeHtml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function resolveRequestOrigin(req: Request): string {
+  const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+  const host = (req.headers['x-forwarded-host'] as string) || req.get('host') || 'card.royaco.com';
+  return `${proto.split(',')[0].trim()}://${host.split(',')[0].trim()}`;
+}
+
+function findProfileForRequest(req: Request): EmployeeProfile | undefined {
+  const queryId = (req.query.id || req.query.card || req.query.profile) as string | undefined;
+  const cleanPath = req.path.replace(/^\/+|\/+$/g, '');
+
+  let identifier = queryId;
+  if (!identifier && cleanPath) {
+    if (cleanPath.startsWith('card/')) {
+      identifier = cleanPath.replace(/^card\//, '').trim();
+    } else if (
+      !cleanPath.includes('.') &&
+      !cleanPath.startsWith('api') &&
+      !cleanPath.startsWith('uploads') &&
+      !cleanPath.startsWith('src') &&
+      !cleanPath.startsWith('@')
+    ) {
+      identifier = cleanPath.trim();
+    }
+  }
+
+  if (!identifier) return undefined;
+  return db.getProfileBySlugOrId(identifier);
+}
+
+function injectDynamicOpenGraph(html: string, req: Request): string {
+  const profile = findProfileForRequest(req);
+  if (!profile) return html;
+
+  const origin = resolveRequestOrigin(req);
+  const company = profile.company || 'شرکت رویا طرح داخلی';
+  const title = `${profile.name} | ${profile.title} - ${company}`;
+  const description = `کارت ویزیت هوشمند ${profile.name} (${profile.title} در ${company}) | تماس مستقیم: ${profile.mobile} | مشاهده اطلاعات تماس، کاتالوگ PDF، مسیریابی و ذخیره در مخاطبین`;
+  const cardUrl = `${origin}/${profile.slug || profile.id}`;
+
+  let ogImage = `${origin}/pwa-512x512.png`;
+  if (profile.avatarUrl) {
+    if (profile.avatarUrl.startsWith('http')) {
+      ogImage = profile.avatarUrl;
+    } else if (profile.avatarUrl.startsWith('/')) {
+      ogImage = `${origin}${profile.avatarUrl}`;
+    }
+  }
+
+  const safeTitle = escapeHtml(title);
+  const safeDesc = escapeHtml(description);
+  const safeImage = escapeHtml(ogImage);
+  const safeUrl = escapeHtml(cardUrl);
+
+  let updated = html
+    .replace(/<title>.*?<\/title>/is, `<title>${safeTitle}</title>`)
+    .replace(
+      /<meta\s+name="description"\s+content="[^"]*"\s*\/?>/i,
+      `<meta name="description" content="${safeDesc}" />`
+    )
+    .replace(
+      /<meta\s+property="og:title"\s+content="[^"]*"\s*\/?>/i,
+      `<meta property="og:title" content="${safeTitle}" />`
+    )
+    .replace(
+      /<meta\s+property="og:description"\s+content="[^"]*"\s*\/?>/i,
+      `<meta property="og:description" content="${safeDesc}" />`
+    );
+
+  const extraMeta = [
+    `<meta property="og:url" content="${safeUrl}" />`,
+    `<meta property="og:image" content="${safeImage}" />`,
+    `<meta name="twitter:card" content="summary" />`,
+    `<meta name="twitter:title" content="${safeTitle}" />`,
+    `<meta name="twitter:description" content="${safeDesc}" />`,
+    `<meta name="twitter:image" content="${safeImage}" />`,
+  ].join('\n    ');
+
+  updated = updated.replace('</head>', `    ${extraMeta}\n  </head>`);
+  return updated;
+}
 
 async function startServer() {
   const app = express();
@@ -34,7 +124,7 @@ async function startServer() {
     },
   });
 
-  // Rate Limiter for PDF Uploads (Spam protection)
+  // Rate Limiter for PDF & Image Uploads (Spam protection)
   const uploadLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 30, // Limit each IP to 30 uploads per windowMs
@@ -97,7 +187,7 @@ async function startServer() {
     res.json({
       status: 'ok',
       service: 'Roya Smart Business Card Backend',
-      version: '2.1.0',
+      version: '2.2.0',
       database: 'Self-Hosted JSON File Store',
       rateLimiting: 'Active',
       analytics: 'Active',
@@ -193,7 +283,12 @@ async function startServer() {
 
       const result = db.recordAnalyticsEvent(id, event);
       if (result.success) {
-        res.json({ success: true, message: 'رویداد آماری با موفقیت ثبت شد.', analytics: result.analytics });
+        res.json({
+          success: true,
+          message: 'رویداد آماری با موفقیت ثبت شد.',
+          profileId: result.profileId,
+          analytics: result.analytics,
+        });
       } else {
         res.status(404).json({ success: false, error: 'پروفایل مورد نظر برای ثبت آمار یافت نشد.' });
       }
@@ -207,6 +302,7 @@ async function startServer() {
   app.get('/api/analytics/summary', requireAdminAuth, (req, res) => {
     try {
       const profiles = db.getAllProfiles();
+      const leads = db.getAllLeads();
       let totalViews = 0;
       let totalNfcTaps = 0;
       let totalQrScans = 0;
@@ -233,6 +329,7 @@ async function startServer() {
         success: true,
         summary: {
           totalProfiles: profiles.length,
+          totalLeads: leads.length,
           totalViews,
           totalNfcTaps,
           totalQrScans,
@@ -250,6 +347,65 @@ async function startServer() {
     }
   });
 
+  // Customer Leads: Submit Contact Lead from Digital Card (Public with Rate Limiting)
+  app.post('/api/leads', analyticsLimiter, (req, res) => {
+    try {
+      const { profileId, customerName, customerMobile, customerCompany, note } = req.body || {};
+      if (!customerName || !String(customerName).trim() || !customerMobile || !String(customerMobile).trim()) {
+        res.status(400).json({
+          success: false,
+          error: 'لطفاً نام و شماره موبایل خود را وارد فرمایید.',
+        });
+        return;
+      }
+
+      const result = db.addLead({
+        profileId: String(profileId || ''),
+        customerName: String(customerName),
+        customerMobile: String(customerMobile),
+        customerCompany: customerCompany ? String(customerCompany) : undefined,
+        note: note ? String(note) : undefined,
+      });
+
+      res.status(201).json({
+        success: true,
+        lead: result.lead,
+        analytics: result.profileAnalytics,
+        message: 'اطلاعات تماس شما با موفقیت برای کارشناس ثبت شد.',
+      });
+    } catch (err) {
+      console.error('Error saving customer lead:', err);
+      res.status(500).json({ success: false, error: 'خطا در ثبت اطلاعات تماس' });
+    }
+  });
+
+  // Customer Leads: Get All Leads (Protected)
+  app.get('/api/leads', requireAdminAuth, (req, res) => {
+    try {
+      const leads = db.getAllLeads();
+      res.json({ success: true, count: leads.length, leads });
+    } catch (err) {
+      console.error('Error getting leads:', err);
+      res.status(500).json({ success: false, error: 'خطا در دریافت لیست مشتریان' });
+    }
+  });
+
+  // Customer Leads: Delete Lead (Protected)
+  app.delete('/api/leads/:id', requireAdminAuth, (req, res) => {
+    try {
+      const { id } = req.params;
+      const deleted = db.deleteLead(id);
+      if (deleted) {
+        res.json({ success: true, message: 'رکورد مشتری با موفقیت حذف شد.' });
+      } else {
+        res.status(404).json({ success: false, error: 'رکورد مورد نظر یافت نشد.' });
+      }
+    } catch (err) {
+      console.error('Error deleting lead:', err);
+      res.status(500).json({ success: false, error: 'خطا در حذف رکورد مشتری' });
+    }
+  });
+
   // Profiles: Create New Profile (Protected)
   app.post('/api/profiles', requireAdminAuth, (req, res) => {
     try {
@@ -263,6 +419,21 @@ async function startServer() {
     } catch (err) {
       console.error('Error creating profile:', err);
       res.status(500).json({ success: false, error: 'خطا در ثبت اطلاعات در دیتابیس' });
+    }
+  });
+
+  // Profiles: Atomic Bulk Brand & Organization Update (Protected)
+  app.put('/api/profiles/bulk-brand', requireAdminAuth, (req, res) => {
+    try {
+      const updatedProfiles = db.updateBrandForAll(req.body || {});
+      res.json({
+        success: true,
+        profiles: updatedProfiles,
+        message: 'اطلاعات برند، کاتالوگ PDF و جهت چیدمان به صورت یکپارچه برای تمام پرسنل ذخیره شد.',
+      });
+    } catch (err) {
+      console.error('Error in bulk brand update:', err);
+      res.status(500).json({ success: false, error: 'خطا در بروزرسانی گروهی اطلاعات برند' });
     }
   });
 
@@ -306,7 +477,7 @@ async function startServer() {
     }
   });
 
-  // Direct VCF Contact Download (Public)
+  // Direct VCF Contact Download with Embedded Photo (Public)
   app.get('/api/vcard/:id', (req, res) => {
     const { id } = req.params;
     const profile = db.getProfileBySlugOrId(id);
@@ -315,25 +486,67 @@ async function startServer() {
       return;
     }
 
+    const origin = resolveRequestOrigin(req);
+    const cardUrl = `${origin}/${profile.slug || profile.id}`;
     const cleanMobile = profile.mobile.replace(/\s+/g, '');
     const cleanLandline = profile.landline.replace(/\s+/g, '');
-    const lat = profile.mapLocation?.lat ?? 35.7757770;
+    const lat = profile.mapLocation?.lat ?? 35.775777;
     const lng = profile.mapLocation?.lng ?? 51.4368051;
+
+    const nameParts = profile.name.trim().split(/\s+/);
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+    const firstName = nameParts[0] || '';
+
+    // Resolve avatar photo from disk (/uploads/...) or inline base64
+    let photoLine = '';
+    if (profile.avatarUrl) {
+      if (profile.avatarUrl.startsWith('/uploads/')) {
+        const localFile = path.resolve(process.cwd(), 'public', profile.avatarUrl.replace(/^\//, ''));
+        if (fs.existsSync(localFile)) {
+          try {
+            const buf = fs.readFileSync(localFile);
+            const ext = path.extname(localFile).toLowerCase();
+            const imgType = ext === '.png' ? 'PNG' : 'JPEG';
+            photoLine = `PHOTO;ENCODING=b;TYPE=${imgType}:${buf.toString('base64')}`;
+          } catch {}
+        }
+      } else if (profile.avatarUrl.startsWith('data:image/')) {
+        const match = profile.avatarUrl.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+        if (match) {
+          const imgType = match[1].toUpperCase().includes('PNG') ? 'PNG' : 'JPEG';
+          photoLine = `PHOTO;ENCODING=b;TYPE=${imgType}:${match[2].replace(/\s+/g, '')}`;
+        }
+      }
+    }
+
+    const noteLines = [
+      `کارت ویزیت دیجیتال هوشمند رویا طرح داخلی (ROYA Surface Center)`,
+      profile.slogan ? `شعار سازمانی: ${profile.slogan}` : '',
+      profile.bio ? `توضیحات: ${profile.bio}` : '',
+      `لینک مستقیم کارت: ${cardUrl}`,
+    ]
+      .filter(Boolean)
+      .join(' \\n ');
 
     const vCardContent = [
       'BEGIN:VCARD',
       'VERSION:3.0',
+      `N;CHARSET=UTF-8:${lastName};${firstName};;;`,
       `FN;CHARSET=UTF-8:${profile.name}`,
-      `N;CHARSET=UTF-8:${profile.name};;;;`,
-      `ORG;CHARSET=UTF-8:${profile.company};${profile.department || 'فروش'}`,
+      `ORG;CHARSET=UTF-8:${profile.company || 'شرکت رویا طرح داخلی'};${profile.department || 'فروش'}`,
       `TITLE;CHARSET=UTF-8:${profile.title}`,
-      `TEL;TYPE=CELL,VOICE:${cleanMobile}`,
+      `TEL;TYPE=CELL,VOICE,PREF:${cleanMobile}`,
       cleanLandline ? `TEL;TYPE=WORK,VOICE:${cleanLandline}` : '',
-      `EMAIL;TYPE=WORK,INTERNET:${profile.email}`,
+      profile.email ? `EMAIL;TYPE=WORK,INTERNET,PREF:${profile.email}` : '',
+      photoLine,
+      `URL;TYPE=WORK,PREF:${cardUrl}`,
       `URL;TYPE=WORK:${profile.websiteUrl || 'https://www.royaco.com'}`,
-      `ADR;TYPE=WORK;CHARSET=UTF-8:;;${profile.address};;;;`,
+      `ADR;TYPE=WORK,POSTAL;CHARSET=UTF-8:;;${profile.address};تهران;تهران;${profile.postalCode || '1939613111'};ایران`,
       `GEO:${lat};${lng}`,
-      `NOTE;CHARSET=UTF-8:${profile.companyEn} - ${profile.slogan || 'طراحی و اجرای دکوراسیون داخلی'}`,
+      profile.instagram ? `X-SOCIALPROFILE;TYPE=instagram:https://instagram.com/${profile.instagram.replace(/^@/, '')}` : '',
+      `NOTE;CHARSET=UTF-8:${noteLines}`,
+      'PRODID:-//ROYA Surface Center//Smart NFC Digital Card 2026//FA',
+      `REV:${new Date().toISOString()}`,
       'END:VCARD',
     ]
       .filter(Boolean)
@@ -341,7 +554,10 @@ async function startServer() {
 
     const fileName = `contact-${profile.name.replace(/\s+/g, '_')}.vcf`;
     res.setHeader('Content-Type', 'text/vcard; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+    );
     res.send('\uFEFF' + vCardContent);
   });
 
@@ -358,9 +574,42 @@ async function startServer() {
     const backupData = req.body;
     const success = db.importBackup(backupData);
     if (success) {
-      res.json({ success: true, message: 'پشتیبان پایگاه داده با موفقیت بازگردانی شد.' });
+      const newToken = db.createSession();
+      res.json({
+        success: true,
+        profiles: db.getAllProfiles(),
+        token: newToken,
+        message: 'پشتیبان پایگاه داده با موفقیت بازگردانی شد.',
+      });
     } else {
       res.status(400).json({ success: false, error: 'فایل پشتیبان نامعتبر است.' });
+    }
+  });
+
+  // Image File Upload (Avatar & Logo - Protected by uploadLimiter and requireAdminAuth)
+  app.post('/api/upload-image', uploadLimiter, requireAdminAuth, (req, res) => {
+    try {
+      const { fileData, type, profileId } = req.body;
+      if (!fileData || typeof fileData !== 'string' || !fileData.startsWith('data:image/')) {
+        res.status(400).json({ success: false, error: 'تصویر ارسالی معتبر نیست.' });
+        return;
+      }
+
+      const prefix = type === 'logo' ? 'logo' : 'avatar';
+      const savedUrl = persistBase64ImageIfNeeded(fileData, prefix, profileId || 'staff');
+      if (!savedUrl || savedUrl.startsWith('data:')) {
+        res.status(500).json({ success: false, error: 'خطا در ذخیره فایل تصویر روی دیسک سرور' });
+        return;
+      }
+
+      res.json({
+        success: true,
+        url: savedUrl,
+        message: 'تصویر با موفقیت روی سرور ذخیره شد.',
+      });
+    } catch (err: any) {
+      console.error('Error uploading image:', err);
+      res.status(500).json({ success: false, error: err?.message || 'خطا در آپلود تصویر' });
     }
   });
 
@@ -418,7 +667,7 @@ async function startServer() {
   });
 
   // ==========================================
-  // Vite Integration & Static Frontend
+  // Vite Integration & Static Frontend with Dynamic OpenGraph SSR
   // ==========================================
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -426,14 +675,36 @@ async function startServer() {
         middlewareMode: true,
         hmr: false,
       },
-      appType: 'spa',
+      appType: 'custom',
     });
     app.use(vite.middlewares);
+
+    app.get('*', async (req, res, next) => {
+      if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) {
+        return next();
+      }
+      try {
+        const indexPath = path.resolve(process.cwd(), 'index.html');
+        let template = fs.readFileSync(indexPath, 'utf-8');
+        template = await vite.transformIndexHtml(req.originalUrl, template);
+        const htmlWithOg = injectDynamicOpenGraph(template, req);
+        res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(htmlWithOg);
+      } catch (e) {
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, { index: false }));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        const rawHtml = fs.readFileSync(indexPath, 'utf-8');
+        const htmlWithOg = injectDynamicOpenGraph(rawHtml, req);
+        res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).send(htmlWithOg);
+      } else {
+        res.status(404).send('Not found');
+      }
     });
   }
 

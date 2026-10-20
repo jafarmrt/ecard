@@ -43,9 +43,11 @@ import {
   MessageCircle,
   Activity,
   Link as LinkIcon,
-  RefreshCw
+  RefreshCw,
+  UserPlus,
+  Contact
 } from 'lucide-react';
-import { EmployeeProfile } from '../types';
+import { EmployeeProfile, CustomerLead } from '../types';
 import { api } from '../services/api';
 import { copyToClipboard } from '../utils/clipboard';
 import { getDirectCardUrl } from '../utils/url';
@@ -63,6 +65,7 @@ interface AdminDashboardProps {
   onOpenNfcModal: () => void;
   onOpenDeployModal: () => void;
   onUpdateProfile: (profile: EmployeeProfile) => Promise<void>;
+  onReplaceAllProfiles?: (profiles: EmployeeProfile[]) => void;
   onDeleteProfile: (id: string) => Promise<void>;
   onResetToDefault: () => Promise<void>;
   onLogout: () => void;
@@ -81,15 +84,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onOpenNfcModal,
   onOpenDeployModal,
   onUpdateProfile,
+  onReplaceAllProfiles,
   onDeleteProfile,
   onResetToDefault,
   onLogout,
   showToast,
   onSwitchToVisitorView,
 }) => {
-  const [activeTab, setActiveTab] = useState<'staff' | 'analytics' | 'brand' | 'location' | 'server'>('staff');
+  const [activeTab, setActiveTab] = useState<'staff' | 'leads' | 'analytics' | 'brand' | 'location' | 'server'>('staff');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [leads, setLeads] = useState<CustomerLead[]>([]);
+  const [leadsLoading, setLeadsLoading] = useState(false);
+  const [leadSearchQuery, setLeadSearchQuery] = useState('');
   const [analyticsData, setAnalyticsData] = useState<{
     totalViews: number;
     totalNfcTaps: number;
@@ -99,6 +106,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     totalCatalogDownloads: number;
     totalVcardDownloads: number;
     totalMapClicks: number;
+    totalLeads?: number;
     totalInteractions?: number;
     totalProfiles?: number;
   } | null>(null);
@@ -134,11 +142,113 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const fetchLeads = async () => {
+    setLeadsLoading(true);
+    try {
+      const res = await api.getLeads();
+      if (res.success && Array.isArray(res.leads)) {
+        setLeads(res.leads);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLeadsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLeads();
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'analytics') {
       fetchAnalytics();
+    } else if (activeTab === 'leads') {
+      fetchLeads();
     }
   }, [activeTab]);
+
+  const filteredLeads = leads.filter((l) => {
+    const q = leadSearchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      l.customerName.toLowerCase().includes(q) ||
+      l.customerMobile.includes(q) ||
+      (l.customerCompany && l.customerCompany.toLowerCase().includes(q)) ||
+      (l.note && l.note.toLowerCase().includes(q)) ||
+      (l.profileName && l.profileName.toLowerCase().includes(q))
+    );
+  });
+
+  const handleDeleteLead = async (id: string) => {
+    const res = await api.deleteLead(id);
+    if (res.success) {
+      setLeads((prev) => prev.filter((l) => l.id !== id));
+      showToast('رکورد مشتری با موفقیت حذف شد.');
+    } else {
+      showToast(res.error || 'خطا در حذف رکورد مشتری');
+    }
+  };
+
+  const handleExportLeadsCsv = () => {
+    if (leads.length === 0) {
+      showToast('هنوز سرنخی برای خروجی اکسل ثبت نشده است.');
+      return;
+    }
+
+    const headers = ['نام مشتری', 'شماره موبایل', 'شرکت / مجموعه', 'کارشناس مربوطه', 'موضوع و یادداشت', 'تاریخ ثبت'];
+    const escapeCsv = (val?: string) => {
+      const str = String(val || '').replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const rows = filteredLeads.map((l) => [
+      escapeCsv(l.customerName),
+      escapeCsv(l.customerMobile),
+      escapeCsv(l.customerCompany || '-'),
+      escapeCsv(l.profileName),
+      escapeCsv(l.note || '-'),
+      escapeCsv(new Date(l.createdAt).toLocaleString('fa-IR')),
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.map(escapeCsv).join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `roya-customer-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    showToast('فایل اکسل (CSV) سرنخ‌های فروش با موفقیت دانلود شد.');
+  };
+
+  const handleDownloadCustomerVcf = (lead: CustomerLead) => {
+    const vcfLines = [
+      'BEGIN:VCARD',
+      'VERSION:3.0',
+      `FN;CHARSET=UTF-8:${lead.customerName}`,
+      `N;CHARSET=UTF-8:${lead.customerName};;;;`,
+      lead.customerCompany ? `ORG;CHARSET=UTF-8:${lead.customerCompany}` : '',
+      `TEL;TYPE=CELL,VOICE,PREF:${lead.customerMobile}`,
+      `NOTE;CHARSET=UTF-8:ثبت شده از طریق کارت ویزیت دیجیتال ${lead.profileName}${lead.note ? ` - یادداشت: ${lead.note}` : ''}`,
+      'END:VCARD',
+    ]
+      .filter(Boolean)
+      .join('\r\n');
+
+    const blob = new Blob(['\uFEFF' + vcfLines], { type: 'text/vcard;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Customer_${lead.customerName.replace(/\s+/g, '_')}.vcf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    showToast(`فایل مخاطب ${lead.customerName} دانلود شد.`);
+  };
 
   // Filter profiles based on search
   const filteredProfiles = profiles.filter((p) => {
@@ -198,20 +308,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleSaveBrandToAll = async () => {
     setBrandSaving(true);
     try {
-      for (const p of profiles) {
-        await onUpdateProfile({
-          ...p,
-          company: brandCompany,
-          website: brandWebsite,
-          websiteUrl: brandWebsite.startsWith('http') ? brandWebsite : `https://${brandWebsite}`,
-          catalogUrl: brandCatalog,
-          catalogPdfUrl: brandCatalogPdfUrl,
-          layoutDirection: brandLayoutDirection,
-          instagram: brandInstagram,
-          instagramUrl: `https://instagram.com/${brandInstagram.replace('@', '')}`,
-        });
+      const res = await api.updateBrandForAll({
+        company: brandCompany,
+        website: brandWebsite,
+        websiteUrl: brandWebsite.startsWith('http') ? brandWebsite : `https://${brandWebsite}`,
+        catalogUrl: brandCatalog,
+        catalogPdfUrl: brandCatalogPdfUrl,
+        layoutDirection: brandLayoutDirection,
+        instagram: brandInstagram,
+        instagramUrl: `https://instagram.com/${brandInstagram.replace(/^@/, '')}`,
+      });
+
+      if (res.success && res.profiles) {
+        if (onReplaceAllProfiles) {
+          onReplaceAllProfiles(res.profiles);
+        }
+        showToast(res.message || 'اطلاعات برند، کاتالوگ PDF و جهت چیدمان با موفقیت برای تمام پرسنل اعمال شد.');
+      } else {
+        showToast(res.error || 'خطا در به‌روزرسانی اطلاعات برند');
       }
-      showToast('اطلاعات برند، کاتالوگ PDF و جهت چیدمان با موفقیت برای تمام پرسنل اعمال شد.');
     } catch {
       showToast('خطا در به‌روزرسانی اطلاعات برند');
     } finally {
@@ -219,9 +334,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleBackupDownload = () => {
-    window.location.href = api.getBackupDownloadUrl();
-    showToast('فایل پشتیبان database.json در حال دانلود است...');
+  const handleBackupDownload = async () => {
+    showToast('در حال آماده‌سازی و دانلود فایل پشتیبان...');
+    const res = await api.downloadBackup();
+    if (res.success) {
+      showToast('فایل پشتیبان database.json با موفقیت دانلود شد.');
+    } else {
+      showToast(res.error || 'خطا در دانلود فایل پشتیبان دیتابیس');
+    }
+  };
+
+  const handleBackupRestore = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        const res = await api.restoreBackup(json);
+        if (res.success) {
+          if (res.profiles && onReplaceAllProfiles) {
+            onReplaceAllProfiles(res.profiles);
+          }
+          showToast('پشتیبان پایگاه داده با موفقیت بازگردانی شد.');
+        } else {
+          showToast(res.error || 'فایل پشتیبان نامعتبر است.');
+        }
+      } catch {
+        showToast('خطا در خواندن فایل JSON پشتیبان');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   return (
@@ -281,6 +426,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         >
           <Users className="w-4 h-4" />
           <span>پرسنل و کارت‌ها ({profiles.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('leads')}
+          className={`flex items-center gap-2 pb-3.5 px-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'leads'
+              ? 'border-amber-400 text-amber-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <UserPlus className="w-4 h-4" />
+          <span>مشتریان و سرنخ‌ها</span>
+          {leads.length > 0 && (
+            <span className="text-[10px] bg-emerald-500 text-slate-950 font-black px-1.5 py-0.5 rounded-full">
+              {leads.length}
+            </span>
+          )}
         </button>
 
         <button
@@ -729,6 +891,165 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
+        {/* TAB: CUSTOMER LEADS & CONTACT EXCHANGE */}
+        {activeTab === 'leads' && (
+          <div className="space-y-5 animate-in fade-in duration-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-emerald-400" />
+                  <span>بانک شماره و سرنخ‌های فروش ثبت‌شده توسط مشتریان ({leads.length})</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  لیست مشتریانی که در نمایشگاه یا جلسات از طریق کارت ویزیت دیجیتال شماره خود را ثبت کرده‌اند
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={fetchLeads}
+                  disabled={leadsLoading}
+                  className="py-2 px-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${leadsLoading ? 'animate-spin' : ''}`} />
+                  <span>بروزرسانی</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportLeadsCsv}
+                  className="py-2 px-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                >
+                  <FileDown className="w-4 h-4 stroke-[2.2]" />
+                  <span>خروجی اکسل (CSV)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Search Bar for Leads */}
+            <div className="relative w-full sm:w-96">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="جستجوی نام مشتری، موبایل، شرکت، یادداشت یا کارشناس..."
+                value={leadSearchQuery}
+                onChange={(e) => setLeadSearchQuery(e.target.value)}
+                className="w-full pr-10 pl-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-amber-500 transition-all"
+              />
+            </div>
+
+            {filteredLeads.length === 0 ? (
+              <div className="bg-slate-800/40 border border-slate-800 rounded-2xl p-10 text-center space-y-2">
+                <UserPlus className="w-8 h-8 text-slate-500 mx-auto" />
+                <p className="text-xs font-bold text-slate-300">
+                  {leads.length === 0
+                    ? 'هنوز هیچ شماره‌ای توسط مشتریان ثبت نشده است.'
+                    : 'مشتری با عبارت جستجو شده یافت نشد.'}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  مشتریان با کلیک روی دکمه «ارسال شماره شما برای کارشناس» در پایین کارت ویزیت می‌توانند مشخصات خود را ثبت کنند.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {filteredLeads.map((lead) => {
+                  const cleanDigits = lead.customerMobile.replace(/\D/g, '');
+                  const waPhone = cleanDigits.startsWith('0')
+                    ? '98' + cleanDigits.slice(1)
+                    : cleanDigits.startsWith('98')
+                      ? cleanDigits
+                      : '98' + cleanDigits;
+
+                  return (
+                    <div
+                      key={lead.id}
+                      className="p-4 bg-slate-800/60 hover:bg-slate-800/90 rounded-2xl border border-slate-700/70 flex flex-col justify-between gap-3 transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-bold text-white">{lead.customerName}</span>
+                            {lead.customerCompany && (
+                              <span className="text-[10.5px] bg-slate-700/80 text-amber-300 px-2 py-0.5 rounded-md border border-slate-600">
+                                {lead.customerCompany}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1.5 text-xs">
+                            <span className="font-mono font-bold text-emerald-400" dir="ltr">
+                              {lead.customerMobile}
+                            </span>
+                            <span className="text-[10.5px] text-slate-400">
+                              • کارشناس: <strong className="text-slate-200">{lead.profileName}</strong>
+                            </span>
+                          </div>
+                          {lead.note && (
+                            <p className="mt-2 text-xs text-slate-300 bg-slate-900/70 p-2.5 rounded-xl border border-slate-700/60 leading-relaxed">
+                              {lead.note}
+                            </p>
+                          )}
+                        </div>
+
+                        <span className="text-[10px] text-slate-400 font-mono whitespace-nowrap">
+                          {new Date(lead.createdAt).toLocaleDateString('fa-IR')}
+                        </span>
+                      </div>
+
+                      <div className="pt-2.5 border-t border-slate-700/60 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <a
+                            href={`tel:${lead.customerMobile}`}
+                            className="py-1.5 px-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                          >
+                            <Phone className="w-3.5 h-3.5" />
+                            <span>تماس</span>
+                          </a>
+
+                          <a
+                            href={`https://wa.me/${waPhone}?text=${encodeURIComponent(
+                              `سلام ${lead.customerName} عزیز، وقت بخیر. از شرکت رویا طرح داخلی (${lead.profileName}) با شما در ارتباطم.`
+                            )}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="py-1.5 px-2.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            <span>واتساپ</span>
+                          </a>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadCustomerVcf(lead)}
+                            className="py-1.5 px-2.5 rounded-xl bg-slate-700/70 hover:bg-slate-700 text-slate-200 text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                            title="ذخیره در مخاطبین گوشی"
+                          >
+                            <Contact className="w-3.5 h-3.5 text-amber-400" />
+                            <span>ذخیره VCF</span>
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`آیا از حذف اطلاعات تماس "${lead.customerName}" اطمینیان دارید؟`)) {
+                              handleDeleteLead(lead.id);
+                            }
+                          }}
+                          className="p-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors cursor-pointer"
+                          title="حذف سرنخ"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* TAB 2: BRAND & ORGANIZATION IDENTITY */}
         {activeTab === 'brand' && (
           <div className="max-w-2xl space-y-5 animate-in fade-in duration-200">
@@ -1049,6 +1370,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 <div className="mt-4 space-y-2.5">
                   <button
+                    type="button"
                     onClick={handleBackupDownload}
                     className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
                   >
@@ -1056,7 +1378,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <span>دانلود فایل پشتیبان دیتابیس (database.json)</span>
                   </button>
 
+                  <label className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer">
+                    <Upload className="w-4 h-4 text-amber-400" />
+                    <span>بازیابی پایگاه داده از فایل پشتیبان (Restore JSON)</span>
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={handleBackupRestore}
+                      className="hidden"
+                    />
+                  </label>
+
                   <button
+                    type="button"
                     onClick={onOpenDeployModal}
                     className="w-full py-2.5 px-4 bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 font-semibold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
                   >

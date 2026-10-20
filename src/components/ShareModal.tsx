@@ -79,9 +79,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, profile
             <div ref={qrRef} className="p-4 bg-white rounded-2xl shadow-lg border border-slate-700">
               <QRCodeCanvas 
                 value={directCardUrl}
-                size={190}
+                size={196}
                 level="H"
                 marginSize={1}
+                imageSettings={{
+                  src: '/favicon.png',
+                  height: 36,
+                  width: 36,
+                  excavate: true,
+                }}
               />
             </div>
             

@@ -7,7 +7,19 @@ export interface EmployeeAnalytics {
   catalogDownloads: number;
   vcardDownloads: number;
   mapClicks: number;
+  leadCaptures?: number;
   lastInteractionAt?: string;
+}
+
+export interface CustomerLead {
+  id: string;
+  profileId: string;
+  profileName: string;
+  customerName: string;
+  customerMobile: string;
+  customerCompany?: string;
+  note?: string;
+  createdAt: string;
 }
 
 export interface EmployeeProfile {

@@ -16,12 +16,15 @@ import {
   Check,
   Sparkles,
   Camera,
-  FileDown
+  FileDown,
+  UserPlus,
+  Share2
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
 import { EmployeeProfile } from '../types';
 import { RoyaLogo } from './RoyaLogo';
+import { LeadCaptureModal } from './LeadCaptureModal';
 import { downloadVCard } from '../utils/vcard';
 import { downloadCatalogPdf } from '../utils/catalog';
 import { api } from '../services/api';
@@ -51,6 +54,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
 }) => {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [catalogDownloading, setCatalogDownloading] = useState(false);
+  const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
   const cardFileInputRef = useRef<HTMLInputElement>(null);
   const canEdit = isAdmin && !isStandalone;
 
@@ -157,7 +161,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
     }
   };
 
-  const handleSaveContact = () => {
+  const handleSaveContact = async () => {
     api.trackAnalyticsEvent(profile.id, 'vcardDownload');
     try {
       confetti({
@@ -170,7 +174,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
       // ignore
     }
 
-    const ok = downloadVCard(profile);
+    const ok = await downloadVCard(profile);
     if (ok) {
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3500);
@@ -549,17 +553,46 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
               <span>فایل مخاطب آماده شد. با باز کردن آن، اطلاعات فوراً در دفترچه تلفن گوشی ثبت می‌شود.</span>
             </div>
           )}
+
+          {/* Secondary Two-Way CTA: تبادل کارت / ارسال شماره مشتری */}
+          <button
+            id="btn-exchange-contact"
+            type="button"
+            onClick={() => setIsLeadModalOpen(true)}
+            className={`mt-2.5 w-full py-3 px-4 bg-stone-900 hover:bg-stone-800 active:scale-[0.99] text-white rounded-2xl flex items-center justify-between shadow-sm transition-all duration-200 cursor-pointer ${
+              isLtr ? 'flex-row-reverse' : ''
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
+                <UserPlus className="w-4 h-4 text-amber-400" />
+              </div>
+              <div className={`flex flex-col ${isLtr ? 'text-left' : 'text-right'}`}>
+                <span className="text-xs sm:text-[13.5px] font-bold">
+                  ارسال شماره شما برای کارشناس
+                </span>
+                <span className="text-[10.5px] text-stone-300 font-normal">
+                  تبادل کارت ویزیت و ثبت درخواست تماس
+                </span>
+              </div>
+            </div>
+            {isLtr ? (
+              <ChevronRight className="w-4 h-4 text-stone-400 shrink-0" />
+            ) : (
+              <ChevronLeft className="w-4 h-4 text-stone-400 shrink-0" />
+            )}
+          </button>
         </div>
 
         {/* 6. Divider "اسکن کنید" */}
-        <div className="pt-6 pb-3 flex items-center justify-center gap-3">
+        <div className="pt-5 pb-3 flex items-center justify-center gap-3">
           <div className="flex-1 h-[1px] bg-stone-200" />
-          <span className="text-xs text-stone-400 font-normal px-2">اسکن کنید</span>
+          <span className="text-xs text-stone-400 font-normal px-2">اسکن یا اشتراک‌گذاری</span>
           <div className="flex-1 h-[1px] bg-stone-200" />
         </div>
 
-        {/* 7. QR Code Container */}
-        <div className="flex flex-col items-center justify-center pb-2">
+        {/* 7. QR Code Container with Branded Center Badge */}
+        <div className="flex flex-col items-center justify-center pb-1">
           <div 
             onClick={onOpenShare}
             className="p-3 bg-white rounded-2xl border border-stone-200/90 shadow-xs hover:border-red-300 hover:shadow-md cursor-pointer transition-all duration-200"
@@ -567,14 +600,36 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
           >
             <QRCodeSVG
               value={cardUrl}
-              size={140}
-              level="M"
+              size={144}
+              level="H"
               fgColor="#1C1917"
               bgColor="#FFFFFF"
+              imageSettings={{
+                src: '/favicon.png',
+                height: 28,
+                width: 28,
+                excavate: true,
+              }}
             />
           </div>
+
+          <button
+            type="button"
+            onClick={onOpenShare}
+            className="mt-2.5 py-1.5 px-3.5 rounded-full bg-stone-100 hover:bg-stone-200/80 text-stone-600 hover:text-stone-900 text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Share2 className="w-3.5 h-3.5 text-[#D0192A]" />
+            <span>اشتراک‌گذاری لینک کارت و بارکد</span>
+          </button>
         </div>
       </div>
+
+      {/* Customer Lead Capture Modal */}
+      <LeadCaptureModal
+        isOpen={isLeadModalOpen}
+        onClose={() => setIsLeadModalOpen(false)}
+        profile={profile}
+      />
     </div>
   );
 };

@@ -1,8 +1,18 @@
-import { EmployeeProfile } from '../types';
+import { EmployeeProfile, CustomerLead } from '../types';
 import { INITIAL_PROFILES } from '../data/defaultProfiles';
 
 const ADMIN_TOKEN_KEY = 'roya_admin_token';
 const PROFILES_CACHE_KEY = 'roya_employee_profiles';
+
+function updateCachedProfiles(profiles: EmployeeProfile[]) {
+  try {
+    if (Array.isArray(profiles) && profiles.length > 0) {
+      localStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(profiles));
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
 
 export const api = {
   // Admin Token Management
@@ -97,7 +107,10 @@ export const api = {
     this.clearAdminToken();
   },
 
-  async changeAdminPassword(oldPassword: string, newPassword: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  async changeAdminPassword(
+    oldPassword: string,
+    newPassword: string
+  ): Promise<{ success: boolean; message?: string; error?: string }> {
     const token = this.getAdminToken();
     if (!token) return { success: false, error: 'احراز هویت انجام نشده است.' };
     try {
@@ -111,6 +124,10 @@ export const api = {
       });
       const data = await res.json();
       if (res.ok && data.success) {
+        if (data.token) {
+          const isLocal = !!localStorage.getItem(ADMIN_TOKEN_KEY);
+          this.setAdminToken(data.token, isLocal);
+        }
         return { success: true, message: data.message };
       }
       return { success: false, error: data.error || data.message || 'خطا در تغییر رمز عبور' };
@@ -126,9 +143,7 @@ export const api = {
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.profiles) && data.profiles.length > 0) {
-          try {
-            localStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(data.profiles));
-          } catch {}
+          updateCachedProfiles(data.profiles);
           return data.profiles;
         }
       }
@@ -206,6 +221,37 @@ export const api = {
     }
   },
 
+  async updateBrandForAll(brandUpdates: {
+    company?: string;
+    website?: string;
+    websiteUrl?: string;
+    catalogUrl?: string;
+    catalogPdfUrl?: string;
+    layoutDirection?: 'rtl' | 'ltr';
+    instagram?: string;
+    instagramUrl?: string;
+  }): Promise<{ success: boolean; profiles?: EmployeeProfile[]; message?: string; error?: string }> {
+    const token = this.getAdminToken();
+    try {
+      const res = await fetch('/api/profiles/bulk-brand', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(brandUpdates),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.profiles)) {
+        updateCachedProfiles(data.profiles);
+        return { success: true, profiles: data.profiles, message: data.message };
+      }
+      return { success: false, error: data.error || 'خطا در بروزرسانی گروهی اطلاعات برند' };
+    } catch {
+      return { success: false, error: 'خطا در برقراری ارتباط با سرور دیتابیس' };
+    }
+  },
+
   async deleteProfile(id: string): Promise<{ success: boolean; error?: string }> {
     const token = this.getAdminToken();
     try {
@@ -237,6 +283,9 @@ export const api = {
       });
       const data = await res.json();
       if (res.ok && data.success) {
+        if (Array.isArray(data.profiles)) {
+          updateCachedProfiles(data.profiles);
+        }
         return { success: true, profiles: data.profiles };
       }
       return { success: false, error: data.error || 'خطا در بازنشانی پایگاه داده' };
@@ -250,7 +299,38 @@ export const api = {
     return '/api/backup';
   },
 
-  async restoreBackup(backupData: any): Promise<{ success: boolean; error?: string }> {
+  // Authenticated Backup Download (Fixes 401 Unauthorized on direct navigation)
+  async downloadBackup(): Promise<{ success: boolean; error?: string }> {
+    const token = this.getAdminToken();
+    if (!token) {
+      return { success: false, error: 'لطفاً ابتدا وارد پنل مدیریت شوید.' };
+    }
+    try {
+      const res = await fetch('/api/backup', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        return { success: false, error: errData.error || 'خطا در دریافت فایل پشتیبان از سرور' };
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `roya-db-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => window.URL.revokeObjectURL(url), 2000);
+      return { success: true };
+    } catch {
+      return { success: false, error: 'خطا در برقراری ارتباط با سرور' };
+    }
+  },
+
+  async restoreBackup(backupData: any): Promise<{ success: boolean; profiles?: EmployeeProfile[]; error?: string }> {
     const token = this.getAdminToken();
     try {
       const res = await fetch('/api/restore', {
@@ -263,7 +343,14 @@ export const api = {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        return { success: true };
+        if (data.token) {
+          const isLocal = !!localStorage.getItem(ADMIN_TOKEN_KEY);
+          this.setAdminToken(data.token, isLocal);
+        }
+        if (Array.isArray(data.profiles)) {
+          updateCachedProfiles(data.profiles);
+        }
+        return { success: true, profiles: data.profiles };
       }
       return { success: false, error: data.error || 'خطا در بازگردانی پشتیبان' };
     } catch {
@@ -275,7 +362,7 @@ export const api = {
   async trackAnalyticsEvent(
     profileIdOrSlug: string,
     event: 'view' | 'nfcTap' | 'qrScan' | 'call' | 'whatsapp' | 'catalogDownload' | 'vcardDownload' | 'mapClick'
-  ): Promise<{ success: boolean; analytics?: any }> {
+  ): Promise<{ success: boolean; profileId?: string; analytics?: EmployeeProfile['analytics'] }> {
     try {
       const res = await fetch(`/api/analytics/${encodeURIComponent(profileIdOrSlug)}/event`, {
         method: 'POST',
@@ -283,7 +370,18 @@ export const api = {
         body: JSON.stringify({ event }),
       });
       if (res.ok) {
-        return await res.json();
+        const data = await res.json();
+        if (data.success && data.analytics && typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('roya:analytics-updated', {
+              detail: {
+                profileId: data.profileId || profileIdOrSlug,
+                analytics: data.analytics,
+              },
+            })
+          );
+        }
+        return data;
       }
       return { success: false };
     } catch {
@@ -306,6 +404,105 @@ export const api = {
       return { success: false, error: 'خطا در دریافت آمار' };
     } catch {
       return { success: false, error: 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  // Customer Leads (Two-way Contact Exchange)
+  async submitLead(payload: {
+    profileId: string;
+    customerName: string;
+    customerMobile: string;
+    customerCompany?: string;
+    note?: string;
+  }): Promise<{ success: boolean; lead?: CustomerLead; message?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (data.analytics && typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('roya:analytics-updated', {
+              detail: {
+                profileId: payload.profileId,
+                analytics: data.analytics,
+              },
+            })
+          );
+        }
+        return { success: true, lead: data.lead, message: data.message };
+      }
+      return { success: false, error: data.error || 'خطا در ثبت اطلاعات تماس' };
+    } catch {
+      return { success: false, error: 'خطا در برقراری ارتباط با سرور' };
+    }
+  },
+
+  async getLeads(): Promise<{ success: boolean; leads?: CustomerLead[]; error?: string }> {
+    const token = this.getAdminToken();
+    if (!token) return { success: false, error: 'احراز هویت انجام نشده است.' };
+    try {
+      const res = await fetch('/api/leads', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return { success: true, leads: data.leads || [] };
+      }
+      return { success: false, error: data.error || 'خطا در دریافت لیست مشتریان' };
+    } catch {
+      return { success: false, error: 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  async deleteLead(id: string): Promise<{ success: boolean; error?: string }> {
+    const token = this.getAdminToken();
+    if (!token) return { success: false, error: 'احراز هویت انجام نشده است.' };
+    try {
+      const res = await fetch(`/api/leads/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return { success: true };
+      }
+      return { success: false, error: data.error || 'خطا در حذف رکورد مشتری' };
+    } catch {
+      return { success: false, error: 'خطا در ارتباط با سرور' };
+    }
+  },
+
+  // Upload Avatar or Logo Image to Server
+  async uploadImage(
+    fileData: string,
+    type: 'avatar' | 'logo',
+    profileId?: string
+  ): Promise<{ success: boolean; url?: string; error?: string }> {
+    const token = this.getAdminToken();
+    try {
+      const res = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ fileData, type, profileId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.url) {
+        return { success: true, url: data.url };
+      }
+      return { success: false, error: data.error || 'خطا در آپلود تصویر' };
+    } catch {
+      return { success: true, url: fileData };
     }
   },
 
