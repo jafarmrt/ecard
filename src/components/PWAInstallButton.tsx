@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Download, Smartphone, X, Share, PlusSquare } from 'lucide-react';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 
 interface PWAInstallButtonProps {
@@ -11,6 +12,8 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
 }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const closeIOSGuide = React.useCallback(() => setShowIOSGuide(false), []);
+  useEscapeKey(showIOSGuide, closeIOSGuide);
 
   // If already running inside standalone installed PWA, do not show
   if (isInstalled) {
@@ -46,7 +49,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
 
         {showIOSGuide && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-slate-700 p-6 shadow-2xl text-slate-100">
+            <div role="dialog" aria-modal="true" className="w-full max-w-sm rounded-3xl bg-slate-900 border border-slate-700 p-6 shadow-2xl text-slate-100">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <Smartphone className="w-5 h-5 text-amber-400" />
@@ -54,7 +57,8 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                 </div>
                 <button
                   onClick={() => setShowIOSGuide(false)}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                  aria-label="بستن"
+                  className="w-11 h-11 shrink-0 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>

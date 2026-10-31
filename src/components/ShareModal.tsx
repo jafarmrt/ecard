@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { X, Copy, Check, Download, MessageCircle, Send, Smartphone, ExternalLink, QrCode, IdCard } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { EmployeeProfile } from '../types';
@@ -15,6 +16,8 @@ interface ShareModalProps {
 export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, profile }) => {
   const [copied, setCopied] = useState(false);
   const qrRef = useRef<HTMLDivElement>(null);
+
+  useEscapeKey(isOpen, onClose);
 
   if (!isOpen) return null;
 
@@ -132,7 +135,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, profile
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-200">
-      <div 
+      <div
+        role="dialog"
+        aria-modal="true"
         className="bg-slate-900 text-slate-100 w-full max-w-md rounded-3xl shadow-2xl relative border border-slate-800 max-h-[90vh] overflow-y-auto overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
@@ -149,7 +154,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, profile
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            aria-label="بستن"
+            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-400"
           >
             <X className="w-5 h-5" />
           </button>
@@ -175,7 +181,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, profile
             
             <div className="mt-3 text-center">
               <p className="text-xs font-bold text-white">کیوآرکد مستقیم محتوای کارت ویزیت (مجهز به ردیاب اسکن)</p>
-              <p className="text-[11px] text-amber-400 font-medium mt-0.5">
+              <p className="text-xs text-amber-400 font-medium mt-0.5">
                 اسکن این کد مستقیماً کارت ویزیت موبایلی را باز کرده و در آمار اسکن QR ثبت می‌شود.
               </p>
             </div>

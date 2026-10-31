@@ -57,6 +57,13 @@
 
 
 
+/* iOS Safari zooms the page when a focused field is under 16px. Keep fields at 16px there. */
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select {
+    font-size: max(1rem, 1em) !important;
+  }
+}
+
 /* Respect the user's "reduce motion" setting */
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {

@@ -100,11 +100,11 @@ export const StaffTab: React.FC<{
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[200px]">
-          <Search className="w-4 h-4 text-stone-400 absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+          <Search className="w-4 h-4 text-stone-400 absolute start-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
           <input
             type="search"
             aria-label="جستجو در کارت‌ها"
-            className={`${inputClass} pr-9`}
+            className={`${inputClass} ps-9`}
             placeholder="جستجوی نام، سمت، شماره یا شعبه"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -169,17 +169,17 @@ export const StaffTab: React.FC<{
                       <span className="block text-[12.5px] text-stone-600 truncate">
                         {[p.title, branchName(p.branchId)].filter(Boolean).join(' · ')}
                       </span>
-                      <span className="block text-[11.5px] text-stone-500 truncate" dir="ltr" style={{ textAlign: 'start' }}>
+                      <span className="block text-xs text-stone-500 truncate" dir="ltr" style={{ textAlign: 'start' }}>
                         /{p.slug || p.id}
                       </span>
                       {status === 'archived' && (
-                        <span className="block text-[11.5px] text-stone-500">
+                        <span className="block text-xs text-stone-500">
                           {successor ? `لینک به کارت ${successor.name} می‌رود` : 'لینک صفحه شرکت را نشان می‌دهد'}
                         </span>
                       )}
                     </span>
                   </button>
-                  <span className="hidden sm:flex flex-col items-center text-[11px] text-stone-500 shrink-0 px-2" title="بازدید">
+                  <span className="hidden sm:flex flex-col items-center text-xs text-stone-500 shrink-0 px-2" title="بازدید">
                     <Eye className="w-4 h-4" aria-hidden="true" />
                     {formatNumber(p.analytics?.views)}
                   </span>

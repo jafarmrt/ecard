@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { formatBytes } from '../admin/ui';
 import { 
   FileText, 
   Upload, 
@@ -36,9 +37,7 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    return formatBytes(bytes);
   };
 
   const handleFile = async (file: File) => {
@@ -125,14 +124,14 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({
         </div>
 
         {uploadedInfo && (
-          <div className="flex items-center gap-1.5 text-[11px] text-emerald-400">
+          <div className="flex items-center gap-1.5 text-xs text-emerald-400">
             <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
             <span className="truncate">آپلود شد: {uploadedInfo.name} ({uploadedInfo.size})</span>
           </div>
         )}
 
         {errorMsg && (
-          <div className="flex items-center gap-1.5 text-[11px] text-rose-400">
+          <div className="flex items-center gap-1.5 text-xs text-rose-400">
             <AlertCircle className="w-3 h-3 text-rose-400 shrink-0" />
             <span>{errorMsg}</span>
           </div>
@@ -161,7 +160,7 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({
           </div>
           <div>
             <h4 className="text-xs font-bold text-white">{label}</h4>
-            <p className="text-[11px] text-slate-400">{description}</p>
+            <p className="text-xs text-slate-400">{description}</p>
           </div>
         </div>
 
@@ -169,7 +168,7 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({
           <button
             type="button"
             onClick={() => downloadCatalogPdf(currentPdfUrl)}
-            className="text-[11px] font-bold text-amber-300 hover:text-amber-200 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+            className="text-xs font-bold text-amber-300 hover:text-amber-200 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
           >
             <FileDown className="w-3.5 h-3.5 text-amber-400" />
             <span>دانلود / تست PDF</span>
@@ -206,8 +205,8 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({
               <span className="text-xs font-bold text-white block">
                 برای انتخاب فایل PDF کلیک کنید یا آن را اینجا رها نمایید
               </span>
-              <span className="text-[11px] text-slate-400 mt-0.5 block">
-                حداکثر حجم مجاز: ۵۰ مگابایت • فرمت: PDF
+              <span className="text-xs text-slate-400 mt-0.5 block">
+                حداکثر حجم مجاز: ۳۰ مگابایت • فرمت: PDF
               </span>
             </div>
           </div>
@@ -233,7 +232,7 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="truncate">فایل <strong>{uploadedInfo.name}</strong> ({uploadedInfo.size}) با موفقیت بارگذاری شد.</span>
           </div>
-          <span className="text-[10.5px] bg-emerald-500/20 px-2 py-0.5 rounded text-emerald-300 shrink-0 font-bold">
+          <span className="text-xs bg-emerald-500/20 px-2 py-0.5 rounded text-emerald-300 shrink-0 font-bold">
             آماده استفاده
           </span>
         </div>

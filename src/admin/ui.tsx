@@ -78,7 +78,7 @@ export const Field: React.FC<{
       {required && <span className="text-red-600"> *</span>}
     </label>
     {children}
-    {hint && <p className="mt-1 text-[11.5px] text-stone-500 leading-relaxed">{hint}</p>}
+    {hint && <p className="mt-1 text-xs text-stone-500 leading-relaxed">{hint}</p>}
   </div>
 );
 
@@ -190,7 +190,7 @@ export const STATUS_LABEL: Record<string, string> = {
 
 export const StatusBadge: React.FC<{ status?: string }> = ({ status = 'active' }) => (
   <span
-    className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold border ${
+    className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold border ${
       status === 'active'
         ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
         : status === 'inactive'

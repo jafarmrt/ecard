@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { 
   X, 
   Radio, 
@@ -42,6 +43,8 @@ export const NfcModal: React.FC<NfcModalProps> = ({
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [includeNfcTrackingParam, setIncludeNfcTrackingParam] = useState<boolean>(true);
+
+  useEscapeKey(isOpen, onClose);
 
   if (!isOpen) return null;
 
@@ -121,7 +124,9 @@ export const NfcModal: React.FC<NfcModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div 
+      <div
+        role="dialog"
+        aria-modal="true"
         className="bg-slate-900 text-slate-100 w-full max-w-3xl rounded-3xl shadow-2xl relative border border-slate-700/80 max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
@@ -134,7 +139,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
             <div>
               <h3 className="font-bold text-base text-white flex items-center gap-2">
                 <span>مرکز برنامه‌ریزی NFC و خروجی چاپخانه کارت‌های PVC</span>
-                <span className="text-[10px] bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">
+                <span className="text-xs bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">
                   NTAG 213/215/216
                 </span>
               </h3>
@@ -145,7 +150,8 @@ export const NfcModal: React.FC<NfcModalProps> = ({
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            aria-label="بستن"
+            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-400"
           >
             <X className="w-5 h-5" />
           </button>
@@ -224,7 +230,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
                 <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs font-mono text-amber-300 select-all break-all" dir="ltr">
                   {nfcTargetUrl}
                 </div>
-                <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={includeNfcTrackingParam}
@@ -304,7 +310,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h4 className="text-xs sm:text-sm font-bold text-white">جدول جامع لینک‌های NFC و QR تمام پرسنل رویا</h4>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
+                  <p className="text-xs text-slate-400 mt-0.5">
                     مناسب برای تحویل به چاپخانه کارت‌های هوشمند PVC (شامل لینک‌های مجزای تپ NFC و اسکن QR)
                   </p>
                 </div>
@@ -319,7 +325,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
 
               <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden max-h-72 overflow-y-auto">
                 <table className="w-full text-right text-xs">
-                  <thead className="bg-slate-800/90 text-slate-300 text-[11px] border-b border-slate-700/60 sticky top-0">
+                  <thead className="bg-slate-800/90 text-slate-300 text-xs border-b border-slate-700/60 sticky top-0">
                     <tr>
                       <th className="p-2.5">نام کارشناس</th>
                       <th className="p-2.5">سمت سازمانی</th>
@@ -333,8 +339,8 @@ export const NfcModal: React.FC<NfcModalProps> = ({
                       return (
                         <tr key={p.id} className="hover:bg-slate-900/80">
                           <td className="p-2.5 font-bold text-white">{p.name}</td>
-                          <td className="p-2.5 text-slate-400 text-[11px]">{p.title}</td>
-                          <td className="p-2.5 font-mono text-[10.5px] text-amber-300 max-w-[220px] truncate" dir="ltr">
+                          <td className="p-2.5 text-slate-400 text-xs">{p.title}</td>
+                          <td className="p-2.5 font-mono text-xs text-amber-300 max-w-[220px] truncate" dir="ltr">
                             {nfcUrl}
                           </td>
                           <td className="p-2.5 text-center">
@@ -361,7 +367,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h4 className="text-xs sm:text-sm font-bold text-white">شیت یکجای بارکدهای QR اختصاصی پرسنل</h4>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
+                  <p className="text-xs text-slate-400 mt-0.5">
                     تمامی بارکدها مجهز به لوگوی مرکزی رویا و پارامتر ردیاب اسکن (<code className="font-mono text-amber-300">?src=qr</code>) هستند
                   </p>
                 </div>
@@ -409,10 +415,10 @@ export const NfcModal: React.FC<NfcModalProps> = ({
                       <span className="mt-2.5 text-xs font-black text-stone-900 truncate max-w-full">
                         {p.name}
                       </span>
-                      <span className="text-[10px] text-stone-500 truncate max-w-full mt-0.5">
+                      <span className="text-xs text-stone-500 truncate max-w-full mt-0.5">
                         {p.title}
                       </span>
-                      <span className="mt-1 text-[9.5px] font-mono text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100" dir="ltr">
+                      <span className="mt-1 text-xs font-mono text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100" dir="ltr">
                         /{p.slug || p.id}
                       </span>
                     </div>
@@ -434,20 +440,20 @@ export const NfcModal: React.FC<NfcModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                   <div className="p-3 bg-slate-900/90 rounded-xl border border-amber-500/30">
                     <div className="font-bold text-amber-400 text-xs">NTAG213 (پیشنهادی)</div>
-                    <div className="text-[11px] text-slate-400 mt-1">حجم: ۱۴۴ بایت</div>
-                    <div className="text-[10.5px] text-slate-300 mt-1">قیمت اقتصادی، سرعت اسکن فوق‌العاده بالا، کاملاً متناسب با لینک کارت رویا</div>
+                    <div className="text-xs text-slate-400 mt-1">حجم: ۱۴۴ بایت</div>
+                    <div className="text-xs text-slate-300 mt-1">قیمت اقتصادی، سرعت اسکن فوق‌العاده بالا، کاملاً متناسب با لینک کارت رویا</div>
                   </div>
 
                   <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-700">
                     <div className="font-bold text-slate-200 text-xs">NTAG215</div>
-                    <div className="text-[11px] text-slate-400 mt-1">حجم: ۵۰۴ بایت</div>
-                    <div className="text-[10.5px] text-slate-300 mt-1">پشتیبانی کامل از لینک‌های بلند و اطلاعات اضافی vCard</div>
+                    <div className="text-xs text-slate-400 mt-1">حجم: ۵۰۴ بایت</div>
+                    <div className="text-xs text-slate-300 mt-1">پشتیبانی کامل از لینک‌های بلند و اطلاعات اضافی vCard</div>
                   </div>
 
                   <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-700">
                     <div className="font-bold text-slate-200 text-xs">NTAG216</div>
-                    <div className="text-[11px] text-slate-400 mt-1">حجم: ۸۸۸ بایت</div>
-                    <div className="text-[10.5px] text-slate-300 mt-1">بیشترین حجم حافظه برای ذخیره مستقیم مخاطب آفلاین روی چیپ</div>
+                    <div className="text-xs text-slate-400 mt-1">حجم: ۸۸۸ بایت</div>
+                    <div className="text-xs text-slate-300 mt-1">بیشترین حجم حافظه برای ذخیره مستقیم مخاطب آفلاین روی چیپ</div>
                   </div>
                 </div>
               </div>
@@ -457,7 +463,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
                   <Lock className="w-4 h-4 text-emerald-400" />
                   <span>توصیه امنیتی مهم: قفل‌گذاری چیپ (Lock Tag)</span>
                 </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
+                <p className="text-xs text-slate-400 leading-relaxed">
                   پس از رایت لینک روی کارت ویزیت فیزیکی پرسنل، می‌توانید از گزینه <strong className="text-white">Lock / Read-Only</strong> در اپلیکیشن NFC Tools یا دستگاه رایت استفاده کنید تا هیچ فرد دیگری نتواند اطلاعات یا لینک روی کارت را بازنویسی یا پاک کند.
                 </p>
               </div>
@@ -467,7 +473,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
 
         {/* Modal Footer */}
         <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between">
-          <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+          <div className="text-xs text-slate-400 flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             <span>سازگار با انواع گوشی‌های اپل آیفون و اندروید</span>
           </div>
