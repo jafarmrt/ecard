@@ -37,7 +37,7 @@ interface EditProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   profile: EmployeeProfile;
-  onSave: (updatedProfile: EmployeeProfile) => void;
+  onSave: (updatedProfile: EmployeeProfile) => void | boolean | undefined | Promise<boolean | void | undefined>;
   onResetToDefault: () => void;
   onDelete?: (id: string) => void;
   canDelete?: boolean;
@@ -80,6 +80,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     });
     setGeoMessage(null);
   }, [profile, isOpen]);
+
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
@@ -231,10 +233,18 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(formData);
-    onClose();
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      // Keep the form open (with the admin's edits) when the server rejects the save.
+      const result = await onSave(formData);
+      if (result !== false) onClose();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -753,10 +763,11 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
               </button>
               <button
                 type="submit"
-                className="py-2.5 px-5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/10 transition-colors cursor-pointer text-xs"
+                disabled={isSaving}
+                className="py-2.5 px-5 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 rounded-xl font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/10 transition-colors cursor-pointer text-xs"
               >
                 <Save className="w-4 h-4 text-slate-950" />
-                <span>ذخیره تغییرات</span>
+                <span>{isSaving ? 'در حال ذخیره...' : 'ذخیره تغییرات'}</span>
               </button>
             </div>
           </div>

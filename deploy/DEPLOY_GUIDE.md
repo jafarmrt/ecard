@@ -40,9 +40,18 @@ sudo chown -R $USER:$USER /var/www/roya-card
 # کپی فایل‌های پروژه به مسیر /var/www/roya-card (یا کلون از گیت‌هاب)
 cd /var/www/roya-card
 
+# تنظیم رمز مدیر و کلید نشست (فقط بار اول)
+cp .env.example .env
+nano .env   # ADMIN_PASSWORD (حداقل ۸ کاراکتر) و SESSION_SECRET را پر کنید
+
 # نصب پکیج‌ها و بیلد فرانت‌اند و بک‌اند
-npm install
+npm ci
 npm run build
+```
+
+برای ساخت SESSION_SECRET تصادفی:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 ---
@@ -96,6 +105,25 @@ docker compose up -d --build
 ---
 
 ## ۷. رمز عبور مدیریت و تنظیمات امنیتی
-- **رمز عبور پیش‌فرض مدیریت:** `roya1403`
-- جهت تغییر رمز عبور در سرور، می‌توانید در فایل `.env` متغیر `ADMIN_PASSWORD=your_secure_password` را قرار دهید یا مستقیماً از داخل پنل مدیریت سایت اقدام به تغییر نمایید.
-- دیتابیس در مسیر `/var/www/roya-card/data/database.json` ذخیره می‌شود و با هر تغییر در پنل کاربری، بلافاصله روی دیسک ماندگار می‌گردد.
+- رمز پیش‌فرض وجود ندارد. رمز مدیر را در فایل `.env` با `ADMIN_PASSWORD` تعیین کنید یا بعد از ورود از پنل مدیریت عوض کنید.
+- رمزهای قدیمی و عمومی `roya1403`، `admin123` و `roya2026` دیگر پذیرفته نمی‌شوند، حتی اگر در دیتابیس قدیمی ذخیره شده باشند.
+- اگر رمز را فراموش کردید، روی سرور اجرا کنید: `npm run admin:password -- "رمز-جدید"`
+- اگر هنگام اولین اجرا `ADMIN_PASSWORD` تعیین نشده باشد، یک رمز موقت تصادفی در لاگ سرور چاپ می‌شود.
+- دیتابیس در `data/database.json` و فایل‌های آپلودشده در `public/uploads/` نگه‌داری می‌شوند. هیچ‌کدام در گیت ذخیره نمی‌شوند؛ از آن‌ها بکاپ بگیرید (`deploy/backup-cron.sh`).
+- فایل بکاپی که از پنل گرفته می‌شود دیگر رمز یا کلید نشست ندارد.
+
+## ۸. به‌روزرسانی سروری که نسخه قبلی روی آن نصب است
+از نسخه 2.3.0 فایل `data/database.json` از گیت حذف شده تا داده واقعی و کلیدها در مخزن نباشند. یک بار به این ترتیب به‌روزرسانی کنید تا داده‌ها حفظ شوند:
+```bash
+cd /var/www/roya-card
+cp data/database.json ~/roya-db-backup-$(date +%F).json   # بکاپ
+git checkout -- data/database.json                         # تا git pull خطا ندهد
+git pull
+cp ~/roya-db-backup-$(date +%F).json data/database.json    # برگرداندن داده واقعی
+
+cp .env.example .env && nano .env   # ADMIN_PASSWORD و SESSION_SECRET
+npm ci && npm run build
+pm2 restart roya-smart-card   # یا: sudo systemctl restart roya-card
+```
+- بعد از این به‌روزرسانی همه مدیرها یک بار از پنل خارج می‌شوند و باید دوباره وارد شوند.
+- در Docker هم فایل `.env` را کنار `package.json` بسازید؛ `docker-compose.yml` آن را می‌خواند.

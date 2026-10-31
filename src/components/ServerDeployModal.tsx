@@ -84,7 +84,8 @@ Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
 Environment=PORT=3000
-Environment=ADMIN_PASSWORD=roya1403
+# ADMIN_PASSWORD و SESSION_SECRET در فایل .env
+EnvironmentFile=-/var/www/roya-card/.env
 
 [Install]
 WantedBy=multi-user.target`;

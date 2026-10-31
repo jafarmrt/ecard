@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Live data (database, uploads) must never be committed
+data/*
+!data/.gitkeep
+public/uploads/

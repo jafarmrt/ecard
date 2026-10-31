@@ -163,52 +163,31 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,eot,pdf}'],
+          // PDFs are not precached: an updated catalog must reach phones without a new release.
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+          // Server routes (vCard downloads, uploads, the catalog) must never get the SPA shell.
+          navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /\.(pdf|vcf)$/i],
           runtimeCaching: [
             {
-              // Google Fonts & CDN Fonts
-              urlPattern: /^https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.jsdelivr\.net)/,
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'roya-webfonts-cache',
-                expiration: {
-                  maxEntries: 30,
-                  maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
-                },
-                cacheableResponse: {
-                  statuses: [0, 200],
-                },
-              },
-            },
-            {
-              // Local Uploads, Avatars & Logos
-              urlPattern: /^\/uploads\/.*/,
+              // Uploaded avatars and logos: show the cached copy instantly, refresh in the background.
+              urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith('/uploads/images/'),
               handler: 'StaleWhileRevalidate',
               options: {
                 cacheName: 'roya-uploads-cache',
-                expiration: {
-                  maxEntries: 100,
-                  maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
-                },
-                cacheableResponse: {
-                  statuses: [0, 200],
-                },
+                expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 30 },
+                cacheableResponse: { statuses: [200] },
               },
             },
             {
-              // Profile APIs (Network first, fall back to offline cache)
-              urlPattern: /^\/api\/(profiles|profile\/.*)/,
+              // A single public card: always try the network so edits show up, fall back offline.
+              urlPattern: ({ url, sameOrigin, request }) =>
+                sameOrigin && request.method === 'GET' && /^\/api\/profiles\/[^/]+$/.test(url.pathname),
               handler: 'NetworkFirst',
               options: {
-                cacheName: 'roya-api-profiles-cache',
-                networkTimeoutSeconds: 3,
-                expiration: {
-                  maxEntries: 50,
-                  maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
-                },
-                cacheableResponse: {
-                  statuses: [0, 200],
-                },
+                cacheName: 'roya-api-card-cache',
+                networkTimeoutSeconds: 4,
+                expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 30 },
+                cacheableResponse: { statuses: [200] },
               },
             },
           ],

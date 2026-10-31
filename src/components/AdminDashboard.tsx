@@ -131,10 +131,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const fetchAnalytics = async () => {
     setAnalyticsLoading(true);
     try {
-      const data = await api.getAnalyticsSummary();
+      const [data, freshProfiles] = await Promise.all([api.getAnalyticsSummary(), api.getProfiles()]);
       if (data && data.success && data.summary) {
         setAnalyticsData(data.summary);
       }
+      // Per-employee numbers come from the profile list, so refresh it too.
+      if (freshProfiles.length > 0) onReplaceAllProfiles?.(freshProfiles);
     } catch {
       // fallback to summing profile props
     } finally {
@@ -198,8 +200,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     const headers = ['نام مشتری', 'شماره موبایل', 'شرکت / مجموعه', 'کارشناس مربوطه', 'موضوع و یادداشت', 'تاریخ ثبت'];
     const escapeCsv = (val?: string) => {
-      const str = String(val || '').replace(/"/g, '""');
-      return `"${str}"`;
+      // Leads come from the public form: neutralise values Excel would run as formulas.
+      let str = String(val || '');
+      if (/^[=+\-@\t\r]/.test(str)) str = `'${str}`;
+      return `"${str.replace(/"/g, '""')}"`;
     };
 
     const rows = filteredLeads.map((l) => [
@@ -282,8 +286,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setPasswordMsg({ type: 'error', text: 'رمز عبور جدید و تکرار آن یکسان نیستند.' });
       return;
     }
-    if (newPassword.length < 4) {
-      setPasswordMsg({ type: 'error', text: 'رمز عبور باید حداقل ۴ کاراکتر باشد.' });
+    if (newPassword.length < 8) {
+      setPasswordMsg({ type: 'error', text: 'رمز عبور باید حداقل ۸ کاراکتر باشد.' });
       return;
     }
 
@@ -840,6 +844,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
 
+            <div className="grid grid-cols-3 gap-3">
+              {([
+                ['instagramClicks', 'باز کردن اینستاگرام', Instagram, 'text-pink-400'],
+                ['websiteClicks', 'باز کردن وب‌سایت', Globe, 'text-sky-400'],
+                ['emailClicks', 'ارسال ایمیل', Mail, 'text-emerald-400'],
+              ] as const).map(([key, label, Icon, color]) => (
+                <div key={key} className="p-3.5 bg-slate-800/50 rounded-2xl border border-slate-700/60 flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] text-slate-400 block">{label}</span>
+                    <span className="text-lg font-bold text-white font-mono mt-0.5 block">
+                      {profiles.reduce((acc, p) => acc + (Number(p.analytics?.[key]) || 0), 0)}
+                    </span>
+                  </div>
+                  <Icon className={`w-5 h-5 shrink-0 ${color}`} aria-hidden="true" />
+                </div>
+              ))}
+            </div>
+
             {/* Performance Ranking by Staff Table */}
             <div className="bg-slate-800/60 rounded-2xl border border-slate-700/80 overflow-hidden">
               <div className="p-4 bg-slate-900/80 border-b border-slate-700/80 flex items-center justify-between">
@@ -1311,10 +1333,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="p-3 bg-amber-500/10 border border-amber-500/25 rounded-xl text-xs text-amber-200/90 leading-relaxed">
                   <div className="font-bold text-amber-300 flex items-center gap-1.5 mb-1">
                     <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                    <span>رمزهای معتبر ورود مدیریت:</span>
+                    <span>نکته امنیتی:</span>
                   </div>
                   <p className="text-[11px] text-slate-300">
-                    رمز پیش‌فرض سیستم: <code className="font-mono bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-bold">roya1403</code> یا <code className="font-mono bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-bold">admin123</code> یا <code className="font-mono bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-bold">roya2026</code>
+                    رمز جدید باید حداقل ۸ کاراکتر باشد. رمزهای پیش‌فرض نسخه‌های قبلی دیگر پذیرفته نمی‌شوند. با تغییر رمز، همه دستگاه‌های دیگر از پنل خارج می‌شوند.
                   </p>
                 </div>
 

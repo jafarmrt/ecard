@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   UserPlus,
@@ -12,10 +12,10 @@ import {
   MessageCircle,
   AlertCircle,
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { EmployeeProfile } from '../types';
 import { api } from '../services/api';
 import { downloadVCard } from '../utils/vcard';
+import { normalizeIranMobile, whatsappNumber } from '../utils/phone';
 
 interface LeadCaptureModalProps {
   isOpen: boolean;
@@ -30,13 +30,6 @@ const QUICK_TOPICS = [
   'همکاری تجاری / نمایندگی',
 ];
 
-function toEnglishDigits(str: string): string {
-  if (!str) return '';
-  return str
-    .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
-    .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
-}
-
 export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
   isOpen,
   onClose,
@@ -49,15 +42,20 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [honeypot, setHoneypot] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  const rawWhatsappDigits = toEnglishDigits(profile.whatsapp).replace(/[^0-9]/g, '');
-  const cleanWhatsapp = rawWhatsappDigits.startsWith('0')
-    ? '98' + rawWhatsappDigits.substring(1)
-    : rawWhatsappDigits.startsWith('98')
-      ? rawWhatsappDigits
-      : '98' + rawWhatsappDigits;
+  const cleanWhatsapp = whatsappNumber(profile.whatsapp || profile.mobile);
 
   const handleSelectTopic = (topic: string) => {
     setNote((prev) => {
@@ -70,13 +68,13 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
     e.preventDefault();
     setErrorMsg(null);
 
-    const normalizedMobile = toEnglishDigits(customerMobile).trim();
-    if (!customerName.trim()) {
+    const normalizedMobile = normalizeIranMobile(customerMobile);
+    if (customerName.trim().length < 2) {
       setErrorMsg('لطفاً نام و نام خانوادگی خود را وارد فرمایید.');
       return;
     }
-    if (!normalizedMobile || normalizedMobile.replace(/\D/g, '').length < 10) {
-      setErrorMsg('لطفاً یک شماره موبایل معتبر وارد فرمایید.');
+    if (!normalizedMobile) {
+      setErrorMsg('شماره موبایل معتبر نیست. نمونه صحیح: 09121234567');
       return;
     }
 
@@ -88,18 +86,11 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
         customerMobile: normalizedMobile,
         customerCompany: customerCompany.trim() || undefined,
         note: note.trim() || undefined,
+        website: honeypot,
       });
 
       if (res.success) {
         setSubmitted(true);
-        try {
-          confetti({
-            particleCount: 55,
-            spread: 65,
-            origin: { y: 0.7 },
-            colors: ['#D0192A', '#10B981', '#F59E0B', '#3B82F6'],
-          });
-        } catch {}
       } else {
         setErrorMsg(res.error || 'خطا در ثبت اطلاعات تماس');
       }
@@ -126,7 +117,10 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
       onClick={handleResetAndClose}
     >
       <div
-        className="bg-white text-stone-900 w-full max-w-md rounded-3xl shadow-2xl relative border border-stone-200 overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lead-modal-title"
+        className="bg-white text-stone-900 w-full max-w-md max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-3xl shadow-2xl relative border border-stone-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Red/Dark Header */}
@@ -136,14 +130,16 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
               <UserPlus className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white">تبادل کارت و ثبت شماره تماس</h3>
+              <h3 id="lead-modal-title" className="font-bold text-base text-white">تبادل کارت و ثبت شماره تماس</h3>
               <p className="text-xs text-white/85 mt-0.5">
                 ارسال مستقیم مشخصات شما برای {profile.name}
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={handleResetAndClose}
+            aria-label="بستن"
             className="p-1.5 rounded-full text-white/80 hover:text-white hover:bg-white/15 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -176,6 +172,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                   <span>ذخیره مخاطب {profile.name} در گوشی شما (.vcf)</span>
                 </button>
 
+                {cleanWhatsapp && (
                 <a
                   href={`https://wa.me/${cleanWhatsapp}?text=${encodeURIComponent(
                     `سلام وقت بخیر، من ${customerName}${customerCompany ? ` از مجموعه ${customerCompany}` : ''} هستم. شماره تماسم را در کارت ویزیت دیجیتال شما ثبت کردم.`
@@ -187,6 +184,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                   <MessageCircle className="w-4 h-4" />
                   <span>ارسال پیام همزمان در واتساپ کارشناس</span>
                 </a>
+                )}
 
                 <button
                   type="button"
@@ -198,7 +196,20 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
               </div>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-3.5">
+            <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
+              {/* Honeypot for spam bots: hidden from people and screen readers. */}
+              <div aria-hidden="true" className="absolute -left-[9999px] w-px h-px overflow-hidden">
+                <label>
+                  Website
+                  <input
+                    type="text"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    value={honeypot}
+                    onChange={(e) => setHoneypot(e.target.value)}
+                  />
+                </label>
+              </div>
               {errorMsg && (
                 <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
@@ -207,13 +218,16 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
               )}
 
               <div>
-                <label className="block text-xs font-bold text-stone-700 mb-1">
+                <label htmlFor="lead-name" className="block text-xs font-bold text-stone-700 mb-1">
                   نام و نام خانوادگی شما <span className="text-red-600">*</span>
                 </label>
                 <div className="relative">
                   <input
+                    id="lead-name"
                     type="text"
                     required
+                    maxLength={80}
+                    autoComplete="name"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
                     placeholder="مثلاً: مهندس علی رضایی"
@@ -223,14 +237,18 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-stone-700 mb-1">
+                <label htmlFor="lead-mobile" className="block text-xs font-bold text-stone-700 mb-1">
                   شماره موبایل جهت تماس <span className="text-red-600">*</span>
                 </label>
                 <div className="relative">
-                  <Phone className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Phone className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
                   <input
+                    id="lead-mobile"
                     type="tel"
                     dir="ltr"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    maxLength={20}
                     required
                     value={customerMobile}
                     onChange={(e) => setCustomerMobile(e.target.value)}
@@ -241,13 +259,16 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-stone-700 mb-1">
+                <label htmlFor="lead-company" className="block text-xs font-bold text-stone-700 mb-1">
                   نام شرکت، مجموعه یا پروژه (اختیاری)
                 </label>
                 <div className="relative">
-                  <Building2 className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Building2 className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
                   <input
+                    id="lead-company"
                     type="text"
+                    maxLength={120}
+                    autoComplete="organization"
                     value={customerCompany}
                     onChange={(e) => setCustomerCompany(e.target.value)}
                     placeholder="مثلاً: گروه معماری پارس / پروژه الهیه"
@@ -276,6 +297,8 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                   <MessageSquare className="w-4 h-4 text-stone-400 absolute left-3.5 top-3" />
                   <textarea
                     rows={2}
+                    maxLength={1000}
+                    aria-label="توضیحات تکمیلی"
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                     placeholder="توضیحات تکمیلی، کد سمپل مدنظر یا زمان مناسب تماس..."

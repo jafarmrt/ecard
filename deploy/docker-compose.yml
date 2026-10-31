@@ -9,10 +9,12 @@ services:
     restart: always
     ports:
       - "3000:3000"
+    # ADMIN_PASSWORD، SESSION_SECRET و PUBLIC_ORIGIN در فایل .env ریشه پروژه (کنار package.json)
+    env_file:
+      - ../.env
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - ADMIN_PASSWORD=roya1403
     volumes:
       # ذخیره‌سازی دائمی پایگاه داده و تصاویر بارگذاری شده روی هاست
       - roya_card_data:/app/data

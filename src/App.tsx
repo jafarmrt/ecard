@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy } from 'react';
 import { 
   Radio, 
   Share2, 
@@ -32,48 +32,37 @@ import {
   User
 } from 'lucide-react';
 import { EmployeeProfile, ViewMode } from './types';
-import { INITIAL_PROFILES } from './data/defaultProfiles';
 import { api } from './services/api';
 import { DigitalCard } from './components/DigitalCard';
 import { RoyaLogo } from './components/RoyaLogo';
-import { HeaderControls } from './components/HeaderControls';
 import { NavigationModal } from './components/NavigationModal';
 import { ShareModal } from './components/ShareModal';
 import { NfcModal } from './components/NfcModal';
-import { EditProfileModal } from './components/EditProfileModal';
-import { NewProfileModal } from './components/NewProfileModal';
-import { LocationSettingsModal } from './components/LocationSettingsModal';
-import { ProfilePhotoUploader } from './components/ProfilePhotoUploader';
 import { AdminLoginModal } from './components/AdminLoginModal';
-import { ServerDeployModal } from './components/ServerDeployModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { AdminDashboard } from './components/AdminDashboard';
 import { parseCurrentRoute, getDirectCardUrl } from './utils/url';
 
-// Helper to read cached profiles synchronously from localStorage on startup
-const getInitialProfiles = (): EmployeeProfile[] => {
-  if (typeof window !== 'undefined') {
-    try {
-      const cached = localStorage.getItem('roya_employee_profiles');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch {}
-  }
-  return INITIAL_PROFILES;
-};
+// Admin-only screens are split into separate chunks so visitors opening a card do not download them.
+const HeaderControls = lazy(() => import('./components/HeaderControls').then((m) => ({ default: m.HeaderControls })));
+const EditProfileModal = lazy(() => import('./components/EditProfileModal').then((m) => ({ default: m.EditProfileModal })));
+const NewProfileModal = lazy(() => import('./components/NewProfileModal').then((m) => ({ default: m.NewProfileModal })));
+const LocationSettingsModal = lazy(() => import('./components/LocationSettingsModal').then((m) => ({ default: m.LocationSettingsModal })));
+const ProfilePhotoUploader = lazy(() => import('./components/ProfilePhotoUploader').then((m) => ({ default: m.ProfilePhotoUploader })));
+const ServerDeployModal = lazy(() => import('./components/ServerDeployModal').then((m) => ({ default: m.ServerDeployModal })));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
 
-// Helper to find profile by ID, slug, or transliterated English name
+// Admins keep a local copy of the staff list for instant start-up and offline use.
+// Visitors never receive the full list; they only load the one card they opened.
+const getInitialProfiles = (): EmployeeProfile[] => (api.getAdminToken() ? api.getCachedProfiles() : []);
+
+// Helper to find profile by ID, slug, or transliterated English name (same priority as the server)
 const findProfileMatch = (list: EmployeeProfile[], identifier: string | null): EmployeeProfile | undefined => {
   if (!identifier) return undefined;
   const clean = identifier.trim().toLowerCase();
-  return list.find(p => 
-    p.id.toLowerCase() === clean || 
-    (p.slug && p.slug.toLowerCase() === clean) ||
-    (p.nameEn && p.nameEn.toLowerCase().replace(/\s+/g, '-') === clean)
+  return (
+    list.find((p) => p.id.toLowerCase() === clean) ||
+    list.find((p) => !!p.slug && p.slug.toLowerCase() === clean) ||
+    list.find((p) => !!p.nameEn && p.nameEn.trim().toLowerCase().replace(/\s+/g, '-') === clean)
   );
 };
 
@@ -92,11 +81,7 @@ export default function App() {
   const [isStandaloneView, setIsStandaloneView] = useState<boolean>(() => initialRoute.isStandalone);
   
   // Full loading flag: true while initial load is happening if we don't have valid cached profiles
-  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(() => {
-    if (initialRoute.targetProfileId && !matchedInitial) return true;
-    if (initialProfiles.length === 0) return true;
-    return false;
-  });
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(() => !matchedInitial);
   const [cardNotFound, setCardNotFound] = useState<boolean>(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [adminWorkspaceActive, setAdminWorkspaceActive] = useState<boolean>(true);
@@ -137,85 +122,79 @@ export default function App() {
     }
   };
 
-  // Initial load from server database & admin authentication check
+  // Loads the full staff list for the admin panel.
+  const loadAdminProfiles = async (): Promise<EmployeeProfile[]> => {
+    const list = await api.getProfiles();
+    setProfiles((prev) => {
+      // Keep a card that was opened directly but is missing from an offline cache.
+      const extra = prev.filter((p) => !list.some((x) => x.id === p.id));
+      return list.length > 0 ? list : extra;
+    });
+    return list;
+  };
+
+  const handleAdminLoggedIn = async () => {
+    setIsAdmin(true);
+    const list = await loadAdminProfiles();
+    setCurrentProfileId((prev) => (list.some((p) => p.id === prev) ? prev : list[0]?.id || prev));
+  };
+
+  const handleAdminLogout = async () => {
+    await api.logoutAdmin();
+    api.clearCachedProfiles();
+    setIsAdmin(false);
+    if (!isStandaloneView) {
+      setProfiles([]);
+    } else {
+      setProfiles((prev) => prev.filter((p) => p.id === currentProfileId).map(({ analytics, ...rest }) => rest as EmployeeProfile));
+    }
+  };
+
+  // Initial load: admin check first, then either the full list (admin) or just the requested card (visitor).
   useEffect(() => {
     let isMounted = true;
     const targetId = initialRoute.targetProfileId;
 
     async function loadInitialData() {
-      // 1. Fetch all profiles from server database
+      let isAuth = false;
       try {
-        const serverProfiles = await api.getProfiles();
+        isAuth = await api.checkAdminAuth();
+      } catch {
+        isAuth = false;
+      }
+      if (!isMounted) return;
+      setIsAdmin(isAuth);
+
+      let list: EmployeeProfile[] = [];
+      if (isAuth) {
+        list = await loadAdminProfiles();
         if (!isMounted) return;
+      } else {
+        api.clearCachedProfiles();
+      }
 
-        const validProfiles = (serverProfiles && serverProfiles.length > 0) 
-          ? serverProfiles 
-          : INITIAL_PROFILES;
-
-        setProfiles(validProfiles);
-
-        if (targetId) {
-          const matched = findProfileMatch(validProfiles, targetId);
-          if (matched) {
-            setCurrentProfileId(matched.id);
+      if (targetId) {
+        const matched = findProfileMatch(list, targetId);
+        if (matched) {
+          setCurrentProfileId(matched.id);
+          setCardNotFound(false);
+        } else {
+          const single = await api.getProfile(targetId);
+          if (!isMounted) return;
+          if (single && single !== 'not-found') {
+            setProfiles((prev) => [single, ...prev.filter((p) => p.id !== single.id)]);
+            setCurrentProfileId(single.id);
             setCardNotFound(false);
           } else {
-            // Check individual profile endpoint
-            try {
-              const singleProfile = await api.getProfile(targetId);
-              if (singleProfile) {
-                setProfiles((prev) => {
-                  const exists = prev.some((p) => p.id === singleProfile.id);
-                  return exists ? prev : [singleProfile, ...prev];
-                });
-                setCurrentProfileId(singleProfile.id);
-                setCardNotFound(false);
-              } else {
-                setCardNotFound(true);
-              }
-            } catch {
-              setCardNotFound(true);
-            }
-          }
-        } else {
-          // No specific profile requested: select first real profile if available
-          if (validProfiles.length > 0) {
-            setCurrentProfileId((prevId) => {
-              return validProfiles.some((p) => p.id === prevId) ? prevId : validProfiles[0].id;
-            });
-          }
-        }
-        setIsInitialLoading(false);
-      } catch (err) {
-        console.warn('Could not load profiles from server API:', err);
-        if (isMounted) {
-          setIsInitialLoading(false);
-          if (targetId) {
             setCardNotFound(true);
           }
         }
+      } else if (list.length > 0) {
+        setCurrentProfileId((prevId) => (list.some((p) => p.id === prevId) ? prevId : list[0].id));
       }
 
-      // 2. Check admin auth token
-      try {
-        const isAuth = await api.checkAdminAuth();
-        if (isMounted) setIsAdmin(isAuth);
-      } catch {
-        if (isMounted) setIsAdmin(false);
-      }
-
-      // 3. Check route view mode
-      try {
-        const route = parseCurrentRoute(initialProfiles);
-        if (isMounted) {
-          if (route.isStandalone) {
-            setIsStandaloneView(true);
-          }
-          if (route.isAdminMode) {
-            setIsAdminModalOpen(true);
-          }
-        }
-      } catch {}
+      setIsInitialLoading(false);
+      if (initialRoute.isAdminMode && !isAuth) setIsAdminModalOpen(true);
     }
 
     loadInitialData();
@@ -230,7 +209,16 @@ export default function App() {
             setCurrentProfileId(matched.id);
             setCardNotFound(false);
           } else {
-            setCardNotFound(true);
+            const wanted = route.targetProfileId;
+            api.getProfile(wanted).then((single) => {
+              if (single && single !== 'not-found') {
+                setProfiles((prev) => [single, ...prev.filter((p) => p.id !== single.id)]);
+                setCurrentProfileId(single.id);
+                setCardNotFound(false);
+              } else {
+                setCardNotFound(true);
+              }
+            });
           }
         } else {
           setCardNotFound(false);
@@ -289,25 +277,21 @@ export default function App() {
       return;
     }
 
-    // 1. Update UI state immediately for responsive feel
-    setProfiles((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    
-    // 2. Persist to server database (which also offloads Base64 images to /uploads/images/)
+    // Save first, then update the UI with what the server actually stored.
     const res = await api.updateProfile(updated);
-    if (res.success) {
-      if (res.profile) {
-        setProfiles((prev) => {
-          const next = prev.map((p) => (p.id === res.profile!.id ? res.profile! : p));
-          try {
-            localStorage.setItem('roya_employee_profiles', JSON.stringify(next));
-          } catch {}
-          return next;
-        });
-      }
+    if (res.success && res.profile) {
+      setProfiles((prev) => {
+        const next = prev.map((p) => (p.id === res.profile!.id ? res.profile! : p));
+        try {
+          localStorage.setItem('roya_employee_profiles', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
       showToast('تغییرات با موفقیت در پایگاه داده سرور ذخیره شد.');
-    } else {
-      showToast(res.error || 'خطا در ذخیره در سرور');
+      return true;
     }
+    showToast(res.error || 'خطا در ذخیره در سرور. تغییرات ذخیره نشد.');
+    return false;
   };
 
   // Update GPS location handler
@@ -334,24 +318,22 @@ export default function App() {
       return;
     }
 
-    setProfiles((prev) => [newProfile, ...prev]);
-    setCurrentProfileId(newProfile.id);
-
     const res = await api.createProfile(newProfile);
-    if (res.success) {
-      if (res.profile) {
-        setProfiles((prev) => {
-          const next = prev.map((p) => (p.id === res.profile!.id ? res.profile! : p));
-          try {
-            localStorage.setItem('roya_employee_profiles', JSON.stringify(next));
-          } catch {}
-          return next;
-        });
-      }
+    if (res.success && res.profile) {
+      const saved = res.profile;
+      setProfiles((prev) => {
+        const next = [saved, ...prev.filter((p) => p.id !== saved.id)];
+        try {
+          localStorage.setItem('roya_employee_profiles', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+      setCurrentProfileId(saved.id);
       showToast('کارمند جدید با موفقیت به پایگاه داده سرور اضافه شد.');
-    } else {
-      showToast(res.error || 'خطا در ذخیره کارمند جدید روی سرور');
+      return true;
     }
+    showToast(res.error || 'خطا در ذخیره کارمند جدید روی سرور');
+    return false;
   };
 
   // Delete profile handler
@@ -367,12 +349,11 @@ export default function App() {
       return;
     }
 
-    const nextProfile = profiles.find((p) => p.id !== id) || profiles[0];
-    setProfiles((prev) => prev.filter((p) => p.id !== id));
-    setCurrentProfileId(nextProfile.id);
-
     const res = await api.deleteProfile(id);
     if (res.success) {
+      const nextProfile = profiles.find((p) => p.id !== id) || profiles[0];
+      setProfiles((prev) => prev.filter((p) => p.id !== id));
+      setCurrentProfileId(nextProfile.id);
       showToast('پروفایل با موفقیت از پایگاه داده سرور حذف گردید.');
     } else {
       showToast(res.error || 'خطا در حذف از سرور');
@@ -474,7 +455,7 @@ export default function App() {
               }}
               className="py-2.5 px-6 bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold rounded-2xl transition-colors cursor-pointer shadow-sm"
             >
-              مشاهده سامانه مرکزی
+              {isAdmin ? 'بازگشت به میز مدیریت' : 'صفحه اصلی'}
             </button>
           </main>
         ) : (
@@ -523,12 +504,11 @@ export default function App() {
           onClose={() => setIsAdminModalOpen(false)}
           isAdmin={isAdmin}
           onAuthSuccess={() => {
-            setIsAdmin(true);
+            void handleAdminLoggedIn();
             showToast('با موفقیت به عنوان مدیر وارد شدید.');
           }}
           onLogout={() => {
-            api.logoutAdmin();
-            setIsAdmin(false);
+            void handleAdminLogout();
             showToast('از پنل مدیریت خارج شدید.');
           }}
           onOpenDeployModal={() => setIsDeployModalOpen(true)}
@@ -540,6 +520,50 @@ export default function App() {
             onClose={() => setIsDeployModalOpen(false)}
           />
         )}
+      </div>
+    );
+  }
+
+  // Public home page: visitors only see the brand; the staff list is for the admin.
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-stone-100 flex flex-col items-center justify-center p-4 font-sans text-stone-900">
+        <main className="w-full max-w-[420px] bg-white rounded-3xl shadow-xl border border-stone-200/80 p-8 flex flex-col items-center justify-center min-h-[380px] text-center">
+          <div className="mb-4">
+            <RoyaLogo size="md" />
+          </div>
+          <h1 className="text-base font-bold text-stone-900 mt-2 mb-2">کارت ویزیت دیجیتال رویا طرح داخلی</h1>
+          <p className="text-sm text-stone-600 max-w-[300px] leading-relaxed mb-6">
+            برای دیدن کارت هر کارشناس، کد QR یا کارت NFC او را اسکن کنید یا لینکی را که برایتان فرستاده باز کنید.
+          </p>
+          <a
+            href="https://www.royaco.com"
+            className="py-3 px-6 bg-[#D0192A] hover:bg-[#B51221] text-white text-sm font-bold rounded-2xl transition-colors shadow-sm"
+          >
+            ورود به وب‌سایت رویا
+          </a>
+          <button
+            type="button"
+            onClick={() => setIsAdminModalOpen(true)}
+            className="mt-6 text-xs text-stone-500 hover:text-stone-800 underline underline-offset-4 flex items-center gap-1.5 cursor-pointer"
+          >
+            <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>ورود مدیر سامانه</span>
+          </button>
+        </main>
+
+        <AdminLoginModal
+          isOpen={isAdminModalOpen}
+          onClose={() => setIsAdminModalOpen(false)}
+          isAdmin={isAdmin}
+          onAuthSuccess={() => {
+            void handleAdminLoggedIn();
+            showToast('با موفقیت به عنوان مدیر وارد شدید.');
+          }}
+          onLogout={() => {
+            void handleAdminLogout();
+          }}
+        />
       </div>
     );
   }
@@ -572,13 +596,12 @@ export default function App() {
           onClose={() => setIsAdminModalOpen(false)}
           isAdmin={isAdmin}
           onAuthSuccess={() => {
-            setIsAdmin(true);
+            void handleAdminLoggedIn();
             setIsNewProfileModalOpen(true);
             showToast('با موفقیت به عنوان مدیر وارد شدید.');
           }}
           onLogout={() => {
-            api.logoutAdmin();
-            setIsAdmin(false);
+            void handleAdminLogout();
           }}
         />
 
@@ -675,8 +698,7 @@ export default function App() {
                 onDeleteProfile={handleDeleteProfile}
                 onResetToDefault={handleResetToDefault}
                 onLogout={() => {
-                  api.logoutAdmin();
-                  setIsAdmin(false);
+                  void handleAdminLogout();
                   showToast('از پنل مدیریت خارج شدید.');
                 }}
                 showToast={showToast}
@@ -977,12 +999,11 @@ export default function App() {
         onClose={() => setIsAdminModalOpen(false)}
         isAdmin={isAdmin}
         onAuthSuccess={() => {
-          setIsAdmin(true);
+          void handleAdminLoggedIn();
           showToast('ورود مدیر سامانه با موفقیت تایید شد.');
         }}
         onLogout={() => {
-          api.logoutAdmin();
-          setIsAdmin(false);
+          void handleAdminLogout();
           showToast('از پنل مدیریت خارج شدید.');
         }}
         onOpenDeployModal={() => setIsDeployModalOpen(true)}

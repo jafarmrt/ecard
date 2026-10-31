@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { normalizeIranMobile, toEnglishDigits } from '../utils/phone';
 import { 
   X, 
   UserPlus, 
@@ -28,8 +29,8 @@ import { optimizeImage } from '../utils/imageOptimizer';
 interface NewProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddProfile?: (newProfile: EmployeeProfile) => void;
-  onSave?: (newProfile: EmployeeProfile) => void;
+  onAddProfile?: (newProfile: EmployeeProfile) => unknown;
+  onSave?: (newProfile: EmployeeProfile) => unknown;
 }
 
 export const NewProfileModal: React.FC<NewProfileModalProps> = ({
@@ -61,6 +62,8 @@ export const NewProfileModal: React.FC<NewProfileModalProps> = ({
 
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const logoFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
@@ -132,11 +135,22 @@ export const NewProfileModal: React.FC<NewProfileModalProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
     const id = 'emp-' + Date.now();
     const cleanSlug = slug.trim() || (nameEn ? nameEn.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') : id);
     const mapUrls = buildMapUrls(lat, lng);
+    // A field left as the bare "0912" prefix means "not entered", not a phone number.
+    const cleanPhone = (value: string) => {
+      const trimmed = value.trim();
+      if (!trimmed || /^0?9\d{0,2}$/.test(toEnglishDigits(trimmed))) return '';
+      return normalizeIranMobile(trimmed) ?? trimmed;
+    };
+    const mobileValue = cleanPhone(mobile);
+    const whatsappValue = cleanPhone(whatsapp) || mobileValue;
+    const websiteValue = website.trim();
     const newProfile: EmployeeProfile = {
       id,
       slug: cleanSlug,
@@ -149,17 +163,17 @@ export const NewProfileModal: React.FC<NewProfileModalProps> = ({
       slogan: 'Dream | Design | Deliver',
       avatarUrl: avatarUrl,
       logoUrl: logoUrl,
-      mobile: mobile || '09120000000',
-      whatsapp: whatsapp || mobile || '09120000000',
+      mobile: mobileValue,
+      whatsapp: whatsappValue,
       landline: landline || '021 2599 1425',
       instagram: instagram || 'royaco',
       instagramUrl: `https://instagram.com/${(instagram || 'royaco').replace('@', '')}`,
-      website: website || 'www.royaco.com',
-      websiteUrl: 'https://www.royaco.com',
+      website: websiteValue,
+      websiteUrl: websiteValue ? (/^https?:\/\//i.test(websiteValue) ? websiteValue : `https://${websiteValue}`) : '',
       catalogUrl: catalogUrl || 'کاتالوگ جامع محصولات رویا',
       catalogPdfUrl: catalogPdfUrl || '/roya-catalog.pdf',
       layoutDirection: layoutDirection,
-      email: email || `${id}@royaco.com`,
+      email: email.trim(),
       address: address || DEFAULT_COORDINATES.address,
       department: department,
       avatarGender: 'male',
@@ -173,10 +187,15 @@ export const NewProfileModal: React.FC<NewProfileModalProps> = ({
     };
 
     const saveHandler = onAddProfile || onSave;
-    if (typeof saveHandler === 'function') {
-      saveHandler(newProfile);
+    if (typeof saveHandler !== 'function') return;
+    setIsSaving(true);
+    try {
+      // Keep the form open when the server rejects it (e.g. the short link is already taken).
+      const result = await saveHandler(newProfile);
+      if (result !== false) onClose();
+    } finally {
+      setIsSaving(false);
     }
-    onClose();
   };
 
   return (
@@ -540,10 +559,11 @@ export const NewProfileModal: React.FC<NewProfileModalProps> = ({
             </button>
             <button
               type="submit"
-              className="py-2.5 px-5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/10 transition-colors cursor-pointer"
+              disabled={isSaving}
+              className="py-2.5 px-5 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 rounded-xl font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/10 transition-colors cursor-pointer"
             >
               <Save className="w-4 h-4 text-slate-950" />
-              <span>ایجاد کارت ویزیت هوشمند</span>
+              <span>{isSaving ? 'در حال ذخیره...' : 'ایجاد کارت ویزیت هوشمند'}</span>
             </button>
           </div>
         </form>

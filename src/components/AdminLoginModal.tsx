@@ -88,8 +88,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       return;
     }
 
-    if (newPassword.length < 4) {
-      setErrorMsg('رمز عبور باید حداقل ۴ کاراکتر باشد.');
+    if (newPassword.length < 8) {
+      setErrorMsg('رمز عبور باید حداقل ۸ کاراکتر باشد.');
       return;
     }
 

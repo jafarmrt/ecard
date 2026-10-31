@@ -1,8 +1,8 @@
 import { EmployeeProfile, CustomerLead } from '../types';
-import { INITIAL_PROFILES } from '../data/defaultProfiles';
 
 const ADMIN_TOKEN_KEY = 'roya_admin_token';
 const PROFILES_CACHE_KEY = 'roya_employee_profiles';
+const CARD_CACHE_PREFIX = 'roya_card_';
 
 function updateCachedProfiles(profiles: EmployeeProfile[]) {
   try {
@@ -13,6 +13,19 @@ function updateCachedProfiles(profiles: EmployeeProfile[]) {
     // ignore storage errors
   }
 }
+
+export type AnalyticsEventName =
+  | 'view'
+  | 'nfcTap'
+  | 'qrScan'
+  | 'call'
+  | 'whatsapp'
+  | 'catalogDownload'
+  | 'vcardDownload'
+  | 'mapClick'
+  | 'instagram'
+  | 'website'
+  | 'email';
 
 export const api = {
   // Admin Token Management
@@ -137,46 +150,73 @@ export const api = {
   },
 
   // Profiles CRUD
+  /** Full list for the admin panel (requires a valid admin token). Falls back to the admin's local cache when offline. */
   async getProfiles(): Promise<EmployeeProfile[]> {
+    const token = this.getAdminToken();
+    if (!token) return [];
     try {
-      const res = await fetch('/api/profiles');
+      const res = await fetch('/api/profiles', { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
         const data = await res.json();
-        if (data.success && Array.isArray(data.profiles) && data.profiles.length > 0) {
+        if (data.success && Array.isArray(data.profiles)) {
           updateCachedProfiles(data.profiles);
           return data.profiles;
         }
       }
     } catch (err) {
-      console.warn('API fetch failed, falling back to cache/defaults:', err);
+      console.warn('API fetch failed, falling back to cache:', err);
     }
-
-    // Fallback to cache or default profiles
-    try {
-      const cached = localStorage.getItem(PROFILES_CACHE_KEY);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch {}
-
-    return INITIAL_PROFILES;
+    return this.getCachedProfiles();
   },
 
-  async getProfile(id: string): Promise<EmployeeProfile | null> {
+  getCachedProfiles(): EmployeeProfile[] {
+    try {
+      const cached = localStorage.getItem(PROFILES_CACHE_KEY);
+      const parsed = cached ? JSON.parse(cached) : null;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  },
+
+  clearCachedProfiles() {
+    try {
+      localStorage.removeItem(PROFILES_CACHE_KEY);
+    } catch {}
+  },
+
+  /**
+   * Public single card. Returns 'not-found' only when the server says so; on a
+   * network error the last copy of this card seen on this device is used.
+   */
+  async getProfile(id: string): Promise<EmployeeProfile | null | 'not-found'> {
+    const cacheKey = `${CARD_CACHE_PREFIX}${String(id).toLowerCase()}`;
     try {
       const res = await fetch(`/api/profiles/${encodeURIComponent(id)}`);
+      if (res.status === 404) {
+        try {
+          localStorage.removeItem(cacheKey);
+        } catch {}
+        return 'not-found';
+      }
       if (res.ok) {
         const data = await res.json();
-        if (data.success && data.profile) return data.profile;
+        if (data.success && data.profile) {
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(data.profile));
+          } catch {}
+          return data.profile;
+        }
       }
     } catch (err) {
       console.warn(`Failed to fetch profile ${id}:`, err);
     }
-    const all = await this.getProfiles();
-    return all.find((p) => p.id === id) || null;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      return cached ? (JSON.parse(cached) as EmployeeProfile) : null;
+    } catch {
+      return null;
+    }
   },
 
   async createProfile(profile: EmployeeProfile): Promise<{ success: boolean; profile?: EmployeeProfile; error?: string }> {
@@ -359,31 +399,15 @@ export const api = {
   },
 
   // Analytics Tracking
-  async trackAnalyticsEvent(
-    profileIdOrSlug: string,
-    event: 'view' | 'nfcTap' | 'qrScan' | 'call' | 'whatsapp' | 'catalogDownload' | 'vcardDownload' | 'mapClick'
-  ): Promise<{ success: boolean; profileId?: string; analytics?: EmployeeProfile['analytics'] }> {
+  async trackAnalyticsEvent(profileIdOrSlug: string, event: AnalyticsEventName): Promise<{ success: boolean }> {
     try {
       const res = await fetch(`/api/analytics/${encodeURIComponent(profileIdOrSlug)}/event`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ event }),
+        keepalive: true, // still delivered when the tap opens another app (tel:, WhatsApp, ...)
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.analytics && typeof window !== 'undefined') {
-          window.dispatchEvent(
-            new CustomEvent('roya:analytics-updated', {
-              detail: {
-                profileId: data.profileId || profileIdOrSlug,
-                analytics: data.analytics,
-              },
-            })
-          );
-        }
-        return data;
-      }
-      return { success: false };
+      return { success: res.ok };
     } catch {
       return { success: false };
     }
@@ -414,7 +438,9 @@ export const api = {
     customerMobile: string;
     customerCompany?: string;
     note?: string;
-  }): Promise<{ success: boolean; lead?: CustomerLead; message?: string; error?: string }> {
+    /** Honeypot: must stay empty. */
+    website?: string;
+  }): Promise<{ success: boolean; lead?: Pick<CustomerLead, 'id' | 'createdAt'>; message?: string; error?: string }> {
     try {
       const res = await fetch('/api/leads', {
         method: 'POST',
@@ -423,16 +449,6 @@ export const api = {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        if (data.analytics && typeof window !== 'undefined') {
-          window.dispatchEvent(
-            new CustomEvent('roya:analytics-updated', {
-              detail: {
-                profileId: payload.profileId,
-                analytics: data.analytics,
-              },
-            })
-          );
-        }
         return { success: true, lead: data.lead, message: data.message };
       }
       return { success: false, error: data.error || 'خطا در ثبت اطلاعات تماس' };

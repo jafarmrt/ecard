@@ -7,6 +7,9 @@ export interface EmployeeAnalytics {
   catalogDownloads: number;
   vcardDownloads: number;
   mapClicks: number;
+  instagramClicks?: number;
+  websiteClicks?: number;
+  emailClicks?: number;
   leadCaptures?: number;
   lastInteractionAt?: string;
 }
