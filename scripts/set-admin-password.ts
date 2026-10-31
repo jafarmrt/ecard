@@ -10,7 +10,7 @@ import { db } from '../src/server/db.ts';
 
 const password = process.argv[2];
 if (!password) {
-  console.error('Usage: npm run admin:password -- "<new password, at least 8 characters>"');
+  console.error('Usage: npm run admin:password -- "<new password, at least 10 characters>"');
   process.exit(1);
 }
 try {

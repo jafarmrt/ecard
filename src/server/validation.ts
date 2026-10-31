@@ -2,6 +2,7 @@
  * Shared server-side validation helpers (pure functions, unit tested).
  */
 import { toEnglishDigits, normalizeIranMobile } from '../utils/phone.ts';
+import { LEAD_TOPICS } from '../utils/leadTopics.ts';
 
 export { toEnglishDigits, normalizeIranMobile };
 
@@ -54,7 +55,9 @@ export interface LeadInput {
   customerName: string;
   customerMobile: string;
   customerCompany?: string;
+  topic?: string;
   note?: string;
+  consent?: boolean;
 }
 
 export const LEAD_LIMITS = {
@@ -65,6 +68,7 @@ export const LEAD_LIMITS = {
 
 function cleanText(value: unknown, max: number): string {
   return String(value ?? '')
+    // eslint-disable-next-line no-control-regex -- stripping control characters is the point
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .trim()
     .slice(0, max);
@@ -86,6 +90,13 @@ export function validateLeadInput(body: any): LeadInput {
   if (!mobile) {
     throw new ValidationError('شماره موبایل معتبر نیست. نمونه صحیح: 09121234567');
   }
+  if (body?.consent !== true) {
+    throw new ValidationError('برای ثبت درخواست، لطفاً اجازه تماس کارشناس را تأیید کنید.');
+  }
+  const topic = cleanText(body?.topic, 60);
+  if (topic && !(LEAD_TOPICS as readonly string[]).includes(topic)) {
+    throw new ValidationError('موضوع درخواست معتبر نیست.');
+  }
   const company = cleanText(body?.customerCompany, LEAD_LIMITS.company);
   const note = cleanText(body?.note, LEAD_LIMITS.note);
   return {
@@ -93,8 +104,10 @@ export function validateLeadInput(body: any): LeadInput {
     customerName: cleanText(rawName, LEAD_LIMITS.name),
     customerMobile: mobile,
     customerCompany: company || undefined,
+    topic: topic || undefined,
     note: note || undefined,
+    consent: true,
   };
 }
 
-export const MIN_PASSWORD_LENGTH = 8;
+export const MIN_PASSWORD_LENGTH = 10;

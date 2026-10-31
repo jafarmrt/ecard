@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 
 /** Points the app at a fresh, empty data + uploads folder. Call before importing the server modules. */
-export function useTempDataDir(): string {
+export function setupTempDataDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roya-test-'));
   process.env.DATA_DIR = path.join(dir, 'data');
   process.env.UPLOADS_DIR = path.join(dir, 'uploads');

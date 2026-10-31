@@ -2,7 +2,6 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { createServer as createViteServer } from 'vite';
 import { createApp, injectDynamicOpenGraph } from './src/server/app.ts';
 import { db, getDataDir } from './src/server/db.ts';
 
@@ -11,6 +10,8 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   if (process.env.NODE_ENV !== 'production') {
+    // Vite is a build tool: loaded only in development so production needs no dev dependencies.
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: false },
       appType: 'custom',
@@ -57,13 +58,36 @@ async function startServer() {
     console.log(`[Roya Server] Application and API running on http://0.0.0.0:${PORT}`);
     console.log(`[Roya Server] Data directory: ${getDataDir()}`);
     db.getAllProfiles(); // create / migrate the database at startup so warnings show immediately
+    runMaintenance();
   });
+
+  // Daily: a consistent copy of the database in data/backups (14 kept) and removal of
+  // uploaded files that no card uses any more (older than one day).
+  function runMaintenance() {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const hasToday = db.listSnapshots().some((s) => s.name.startsWith(`roya-daily-${today}`));
+      if (!hasToday) db.snapshot('daily');
+      db.pruneSnapshots(14);
+      const removed = db.cleanupUploads();
+      if (removed.length) {
+        db.audit('cleanup', 'uploads', null, `${removed.length} فایل بدون استفاده حذف شد`);
+        console.log(`[Roya Server] Removed ${removed.length} unused uploaded files.`);
+      }
+    } catch (err) {
+      console.error('[Roya Server] Maintenance failed:', err);
+    }
+  }
+  setInterval(runMaintenance, 6 * 60 * 60 * 1000).unref();
 
   // Write any batched analytics before the process exits.
   const shutdown = (signal: string) => {
     console.log(`[Roya Server] ${signal} received, saving data...`);
     db.flush();
-    server.close(() => process.exit(0));
+    server.close(() => {
+      db.close();
+      process.exit(0);
+    });
     setTimeout(() => process.exit(0), 3000).unref();
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

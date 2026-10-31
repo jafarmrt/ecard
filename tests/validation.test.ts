@@ -28,7 +28,7 @@ describe('Iranian mobile numbers', () => {
 
 describe('lead validation', () => {
   it('normalises a valid lead', () => {
-    const lead = validateLeadInput({ profileId: 'x', customerName: '  علی رضایی ', customerMobile: '۰۹۱۲ ۱۲۳ ۴۵۶۷' });
+    const lead = validateLeadInput({ profileId: 'x', customerName: '  علی رضایی ', customerMobile: '۰۹۱۲ ۱۲۳ ۴۵۶۷', consent: true });
     expect(lead.customerName).toBe('علی رضایی');
     expect(lead.customerMobile).toBe('09121234567');
   });
@@ -39,7 +39,7 @@ describe('lead validation', () => {
   });
 
   it('truncates long optional fields', () => {
-    const lead = validateLeadInput({ customerName: 'Ali', customerMobile: '09121234567', note: 'n'.repeat(5000) });
+    const lead = validateLeadInput({ customerName: 'Ali', customerMobile: '09121234567', note: 'n'.repeat(5000), consent: true });
     expect(lead.note!.length).toBe(1000);
   });
 });

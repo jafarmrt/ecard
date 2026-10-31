@@ -6,7 +6,6 @@ import {
   Building2,
   MessageSquare,
   Check,
-  Sparkles,
   Send,
   Contact,
   MessageCircle,
@@ -16,29 +15,28 @@ import { EmployeeProfile } from '../types';
 import { api } from '../services/api';
 import { downloadVCard } from '../utils/vcard';
 import { normalizeIranMobile, whatsappNumber } from '../utils/phone';
+import { LEAD_TOPICS } from '../utils/leadTopics';
 
 interface LeadCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
   profile: EmployeeProfile;
+  /** How the visitor reached the card (nfc / qr / link), stored with the lead. */
+  source?: string;
 }
-
-const QUICK_TOPICS = [
-  'استعلام قیمت و موجودی',
-  'درخواست سمپل و کاتالوگ',
-  'پروژه معماری / دکوراسیون',
-  'همکاری تجاری / نمایندگی',
-];
 
 export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
   isOpen,
   onClose,
   profile,
+  source,
 }) => {
   const [customerName, setCustomerName] = useState('');
   const [customerMobile, setCustomerMobile] = useState('');
   const [customerCompany, setCustomerCompany] = useState('');
   const [note, setNote] = useState('');
+  const [topic, setTopic] = useState('');
+  const [consent, setConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -57,13 +55,6 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
 
   const cleanWhatsapp = whatsappNumber(profile.whatsapp || profile.mobile);
 
-  const handleSelectTopic = (topic: string) => {
-    setNote((prev) => {
-      if (prev.includes(topic)) return prev;
-      return prev ? `${prev} - ${topic}` : topic;
-    });
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -77,6 +68,10 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
       setErrorMsg('شماره موبایل معتبر نیست. نمونه صحیح: 09121234567');
       return;
     }
+    if (!consent) {
+      setErrorMsg('برای ثبت درخواست، لطفاً اجازه تماس کارشناس را تأیید کنید.');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -86,6 +81,9 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
         customerMobile: normalizedMobile,
         customerCompany: customerCompany.trim() || undefined,
         note: note.trim() || undefined,
+        topic: topic || undefined,
+        consent,
+        source,
         website: honeypot,
       });
 
@@ -107,6 +105,8 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
     setCustomerMobile('');
     setCustomerCompany('');
     setNote('');
+    setTopic('');
+    setConsent(false);
     setErrorMsg(null);
     onClose();
   };
@@ -157,8 +157,9 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                 <h4 className="text-base font-black text-stone-800">
                   مشخصات شما با موفقیت ثبت شد!
                 </h4>
-                <p className="text-xs text-stone-500 mt-1.5 leading-relaxed">
-                  اطلاعات تماس شما در کارتابل <span className="font-bold text-stone-800">{profile.name}</span> ({profile.title}) ثبت گردید تا در اسرع وقت با شما ارتباط برقرار شود.
+                <p className="text-[13px] text-stone-600 mt-1.5 leading-relaxed">
+                  درخواست شما برای <span className="font-bold text-stone-800">{profile.name}</span> ارسال شد.
+                  کارشناس ما حداکثر تا ۲۴ ساعت کاری با شما تماس می‌گیرد.
                 </p>
               </div>
 
@@ -277,35 +278,55 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-stone-700 mb-1.5">
-                  موضوع درخواست یا یادداشت کوتاه:
-                </label>
+              <fieldset>
+                <legend className="block text-xs font-bold text-stone-700 mb-1.5">موضوع درخواست</legend>
                 <div className="flex flex-wrap gap-1.5 mb-2">
-                  {QUICK_TOPICS.map((topic) => (
-                    <button
-                      key={topic}
-                      type="button"
-                      onClick={() => handleSelectTopic(topic)}
-                      className="text-[10.5px] px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-red-50 text-stone-600 hover:text-[#D0192A] border border-stone-200 hover:border-red-200 transition-colors cursor-pointer"
-                    >
-                      + {topic}
-                    </button>
-                  ))}
+                  {LEAD_TOPICS.map((t) => {
+                    const selected = topic === t;
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setTopic(selected ? '' : t)}
+                        className={`text-[12px] min-h-9 px-3 rounded-lg border transition-colors cursor-pointer ${
+                          selected
+                            ? 'bg-[#D0192A] text-white border-[#D0192A]'
+                            : 'bg-stone-100 hover:bg-red-50 text-stone-700 hover:text-[#B51221] border-stone-200 hover:border-red-200'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="relative">
-                  <MessageSquare className="w-4 h-4 text-stone-400 absolute left-3.5 top-3" />
+                  <MessageSquare className="w-4 h-4 text-stone-400 absolute left-3.5 top-3" aria-hidden="true" />
                   <textarea
                     rows={2}
                     maxLength={1000}
                     aria-label="توضیحات تکمیلی"
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
-                    placeholder="توضیحات تکمیلی، کد سمپل مدنظر یا زمان مناسب تماس..."
+                    placeholder="توضیحات تکمیلی، کد سمپل مدنظر یا زمان مناسب تماس (اختیاری)"
                     className="w-full pl-9 pr-3.5 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden focus:border-[#D0192A] focus:bg-white transition-colors resize-none"
                   />
                 </div>
-              </div>
+              </fieldset>
+
+              <label htmlFor="lead-consent" className="flex items-start gap-2.5 p-3 rounded-xl bg-stone-50 border border-stone-200 cursor-pointer">
+                <input
+                  id="lead-consent"
+                  type="checkbox"
+                  required
+                  checked={consent}
+                  onChange={(e) => setConsent(e.target.checked)}
+                  className="mt-0.5 w-5 h-5 accent-[#D0192A] shrink-0"
+                />
+                <span className="text-[12px] text-stone-700 leading-relaxed">
+                  موافقم کارشناس {profile.company || 'شرکت'} برای پاسخ به این درخواست با من تماس بگیرد. شماره من فقط برای همین کار استفاده می‌شود.
+                </span>
+              </label>
 
               <div className="pt-2 flex items-center gap-2">
                 <button

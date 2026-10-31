@@ -14,7 +14,6 @@ import {
   Contact,
   User,
   Check,
-  Camera,
   FileDown,
   UserPlus,
   Share2,
@@ -26,17 +25,14 @@ import { LeadCaptureModal } from './LeadCaptureModal';
 import { downloadVCard } from '../utils/vcard';
 import { downloadCatalogPdf, resolveCatalogUrl } from '../utils/catalog';
 import { api, AnalyticsEventName } from '../services/api';
-import { optimizeImage } from '../utils/imageOptimizer';
 import { getBaseOrigin } from '../utils/url';
-import { telHref, whatsappNumber } from '../utils/phone';
+import { telHref, whatsappNumber, toPersianDigits } from '../utils/phone';
 
 interface DigitalCardProps {
   profile: EmployeeProfile;
   onOpenNavigation: () => void;
   onOpenShare: () => void;
   onOpenNfc: () => void;
-  onUpdateAvatar?: (avatarDataUrl: string) => void;
-  onUpdateLogo?: (logoDataUrl: string | undefined) => void;
   isStandalone?: boolean;
   isAdmin?: boolean;
 }
@@ -156,47 +152,72 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
   profile,
   onOpenNavigation,
   onOpenShare,
-  onUpdateAvatar,
-  onUpdateLogo,
   isStandalone = false,
   isAdmin = false,
 }) => {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [catalogDownloading, setCatalogDownloading] = useState(false);
   const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
-  const cardFileInputRef = useRef<HTMLInputElement>(null);
+  const [showStickyBar, setShowStickyBar] = useState(false);
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+  // Where the visitor came from (?src=nfc|qr|link, ?c=campaign); read once before the URL is cleaned.
+  const visitRef = useRef<{ source: string; campaign: string } | null>(null);
+  if (visitRef.current === null) {
+    let source = 'link';
+    let campaign = '';
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const src = (params.get('src') || params.get('ref') || '').toLowerCase();
+      if (src === 'nfc' || src === 'qr') source = src;
+      campaign = (params.get('c') || params.get('campaign') || '').slice(0, 60);
+    } catch {
+      // ignore
+    }
+    visitRef.current = { source, campaign };
+  }
 
-  const canEdit = isAdmin && !isStandalone;
   // Only real visitors are counted: not the admin panel preview and not a logged-in admin.
   const shouldTrack = isStandalone && !isAdmin;
 
   const track = (event: AnalyticsEventName) => {
-    if (shouldTrack) void api.trackAnalyticsEvent(profile.id, event);
+    if (shouldTrack) void api.trackAnalyticsEvent(profile.id, event, visitRef.current ?? undefined);
   };
 
-  // Count the visit once per browser session, then drop ?src=… so a re-shared link is not counted as a QR/NFC scan.
+  // Count the visit once per browser session, then drop ?src / ?c so a re-shared link is not counted as a QR/NFC scan.
   useEffect(() => {
     if (!profile?.id || !isStandalone) return;
     try {
-      const url = new URL(window.location.href);
-      const src = url.searchParams.get('src') || url.searchParams.get('ref') || '';
-      const eventType: AnalyticsEventName = src === 'nfc' ? 'nfcTap' : src === 'qr' ? 'qrScan' : 'view';
       if (!isAdmin) {
         const sessionKey = `roya_view_logged_${profile.id}`;
         if (!sessionStorage.getItem(sessionKey)) {
           sessionStorage.setItem(sessionKey, '1');
-          void api.trackAnalyticsEvent(profile.id, eventType);
+          void api.trackAnalyticsEvent(profile.id, 'view', visitRef.current ?? undefined);
         }
       }
-      if (src) {
-        url.searchParams.delete('src');
-        url.searchParams.delete('ref');
-        window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+      const url = new URL(window.location.href);
+      let changed = false;
+      for (const key of ['src', 'ref', 'c', 'campaign']) {
+        if (url.searchParams.has(key)) {
+          url.searchParams.delete(key);
+          changed = true;
+        }
       }
+      if (changed) window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
     } catch {
       // ignore (private mode, old browsers)
     }
   }, [profile?.id, isStandalone, isAdmin]);
+
+  // Sticky action bar: shown on the public card page once the main "save contact" button scrolls out of view.
+  useEffect(() => {
+    if (!isStandalone || !saveButtonRef.current || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowStickyBar(!entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(saveButtonRef.current);
+    return () => observer.disconnect();
+  }, [isStandalone]);
 
   const isLtr = profile.layoutDirection === 'ltr';
   const telMobile = telHref(profile.mobile);
@@ -212,22 +233,6 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
 
   const identifier = (profile.slug || profile.id).trim();
   const cardUrl = `${getBaseOrigin()}/${identifier}?src=qr`;
-
-  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !onUpdateAvatar || !file.type.startsWith('image/')) return;
-    try {
-      const optimized = await optimizeImage(file, { maxWidth: 400, maxHeight: 400, quality: 0.82, format: 'image/webp' });
-      onUpdateAvatar(optimized.dataUrl);
-    } catch {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        if (result) onUpdateAvatar(result);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   const handleSaveContact = async () => {
     track('vcardDownload');
@@ -261,62 +266,29 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
       className="w-full max-w-[430px] mx-auto bg-white rounded-3xl p-4 sm:p-7 card-shadow border border-stone-100/90 transition-all duration-300"
       dir={isLtr ? 'ltr' : 'rtl'}
     >
-      {canEdit && (
-        <input
-          ref={cardFileInputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          className="hidden"
-          onChange={handleAvatarFileChange}
-        />
-      )}
-
       {/* 1. Brand logo */}
       <div className="pt-2 pb-5 flex flex-col items-center">
-        <RoyaLogo size="md" logoUrl={profile.logoUrl} editable={canEdit} onLogoChange={onUpdateLogo} />
+        <RoyaLogo size="md" logoUrl={profile.logoUrl} />
       </div>
 
       {/* 2. Avatar */}
       <div className="flex flex-col items-center justify-center">
-        <div className="relative group">
-          <div
-            onClick={() => {
-              if (canEdit) cardFileInputRef.current?.click();
-            }}
-            className={`w-24 h-24 sm:w-26 sm:h-26 rounded-full border border-stone-200 flex items-center justify-center bg-white shadow-xs p-1 relative overflow-hidden transition-all ${
-              canEdit ? 'cursor-pointer hover:border-[#D0192A]' : ''
-            }`}
-            title={canEdit ? 'کلیک برای تغییر تصویر پرسنلی' : undefined}
-          >
-            {profile.avatarUrl ? (
-              <img
-                src={profile.avatarUrl}
-                alt={`تصویر ${profile.name}`}
-                className="w-full h-full rounded-full object-cover"
-                referrerPolicy="no-referrer"
-                decoding="async"
-              />
-            ) : (
-              <div className="w-full h-full rounded-full bg-stone-50/50 flex items-center justify-center text-stone-400">
-                <User className="w-13 h-13 stroke-[1.2] text-stone-400" aria-hidden="true" />
-              </div>
-            )}
-            {canEdit && (
-              <div className="absolute inset-0 bg-stone-900/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white text-[10px] font-medium transition-all">
-                <Camera className="w-4 h-4 text-red-400 mb-0.5" />
-                <span>تغییر عکس</span>
-              </div>
-            )}
-          </div>
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => cardFileInputRef.current?.click()}
-              aria-label="آپلود تصویر پرسنلی"
-              className="absolute -bottom-1 -left-1 w-7 h-7 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-md border-2 border-white transition-transform active:scale-95 cursor-pointer"
-            >
-              <Camera className="w-3.5 h-3.5 text-white" />
-            </button>
+        <div className="w-24 h-24 sm:w-26 sm:h-26 rounded-full border border-stone-200 flex items-center justify-center bg-white shadow-xs p-1 overflow-hidden">
+          {profile.avatarUrl ? (
+            <img
+              src={profile.avatarUrl}
+              alt={`تصویر ${profile.name}`}
+              width={104}
+              height={104}
+              className="w-full h-full rounded-full object-cover"
+              referrerPolicy="no-referrer"
+              decoding="async"
+              fetchPriority="high"
+            />
+          ) : (
+            <div className="w-full h-full rounded-full bg-stone-50/50 flex items-center justify-center text-stone-400">
+              <User className="w-13 h-13 stroke-[1.2] text-stone-400" aria-hidden="true" />
+            </div>
           )}
         </div>
 
@@ -340,7 +312,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
                 id="btn-call-mobile"
                 href={`tel:${telMobile}`}
                 label="تماس"
-                value={profile.mobile}
+                value={toPersianDigits(profile.mobile)}
                 icon={<Phone className="w-5 h-5 stroke-[1.8]" />}
                 ariaLabel={`تماس با موبایل ${profile.mobile}`}
                 onClick={() => track('call')}
@@ -351,7 +323,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
                 id="btn-whatsapp"
                 href={`https://wa.me/${waNumber}?text=${encodeURIComponent('سلام وقت بخیر، از طریق کارت ویزیت دیجیتال با شما ارتباط می‌گیرم.')}`}
                 label="واتساپ"
-                value={profile.whatsapp}
+                value={toPersianDigits(profile.whatsapp)}
                 icon={<MessageCircle className="w-5 h-5 stroke-[1.8]" />}
                 ariaLabel={`پیام در واتساپ به ${profile.whatsapp}`}
                 external
@@ -368,7 +340,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
                 id="btn-call-landline"
                 href={`tel:${telLandline}`}
                 label="تلفن ثابت"
-                value={profile.landline}
+                value={toPersianDigits(profile.landline)}
                 icon={<PhoneCall className="w-5 h-5 stroke-[1.8]" />}
                 ariaLabel={`تماس با تلفن ثابت ${profile.landline}`}
                 onClick={() => track('call')}
@@ -453,7 +425,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
             onClick={handleOpenRouting}
             ariaLabel={`آدرس و مسیریابی: ${profile.address}`}
           >
-            <span className="text-[13px] text-stone-600 font-normal leading-relaxed">{profile.address}</span>
+            <span className="text-[13px] text-stone-600 font-normal leading-relaxed">{toPersianDigits(profile.address)}</span>
           </WideTile>
         )}
 
@@ -461,6 +433,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
         <div className="pt-2">
           <button
             id="btn-save-contact"
+            ref={saveButtonRef}
             type="button"
             onClick={handleSaveContact}
             className="w-full py-3.5 sm:py-4 px-4 sm:px-5 bg-[#D0192A] hover:bg-[#B51221] active:scale-[0.98] text-white rounded-2xl flex items-center justify-between gap-3 shadow-lg shadow-red-500/20 transition-all duration-200 cursor-pointer"
@@ -547,7 +520,60 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
       </div>
 
     </div>
-    <LeadCaptureModal isOpen={isLeadModalOpen} onClose={() => setIsLeadModalOpen(false)} profile={profile} />
+    {isStandalone && (
+      <div
+        className={`fixed inset-x-0 bottom-0 z-40 transition-transform duration-300 ${showStickyBar ? 'translate-y-0' : 'translate-y-full'}`}
+        aria-hidden={!showStickyBar}
+      >
+        <div
+          className="max-w-[430px] mx-auto px-3 pt-2 bg-white/95 backdrop-blur border-t border-stone-200 shadow-[0_-6px_20px_rgba(0,0,0,0.06)] flex gap-2"
+          style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+          dir={isLtr ? 'ltr' : 'rtl'}
+        >
+          <button
+            type="button"
+            onClick={handleSaveContact}
+            tabIndex={showStickyBar ? 0 : -1}
+            className="flex-1 min-h-12 rounded-xl bg-[#D0192A] hover:bg-[#B51221] text-white text-[13.5px] font-bold flex items-center justify-center gap-2 cursor-pointer"
+          >
+            {savedSuccess ? <Check className="w-4 h-4" aria-hidden="true" /> : <Contact className="w-4 h-4" aria-hidden="true" />}
+            ذخیره مخاطب
+          </button>
+          {telMobile && (
+            <a
+              href={`tel:${telMobile}`}
+              onClick={() => track('call')}
+              tabIndex={showStickyBar ? 0 : -1}
+              aria-label={`تماس با ${profile.name}`}
+              className="min-h-12 min-w-12 px-3 rounded-xl border border-stone-200 text-[#D0192A] flex items-center justify-center gap-1.5 text-[13px] font-bold"
+            >
+              <Phone className="w-5 h-5" aria-hidden="true" />
+              <span>تماس</span>
+            </a>
+          )}
+          {waNumber && (
+            <a
+              href={`https://wa.me/${waNumber}?text=${encodeURIComponent('سلام وقت بخیر، از طریق کارت ویزیت دیجیتال با شما ارتباط می‌گیرم.')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => track('whatsapp')}
+              tabIndex={showStickyBar ? 0 : -1}
+              aria-label={`پیام در واتساپ به ${profile.name}`}
+              className="min-h-12 min-w-12 px-3 rounded-xl border border-stone-200 text-emerald-700 flex items-center justify-center gap-1.5 text-[13px] font-bold"
+            >
+              <MessageCircle className="w-5 h-5" aria-hidden="true" />
+              <span>واتساپ</span>
+            </a>
+          )}
+        </div>
+      </div>
+    )}
+    <LeadCaptureModal
+      isOpen={isLeadModalOpen}
+      onClose={() => setIsLeadModalOpen(false)}
+      profile={profile}
+      source={visitRef.current?.source}
+    />
     </>
   );
 };

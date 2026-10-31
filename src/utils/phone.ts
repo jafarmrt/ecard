@@ -32,3 +32,8 @@ export function whatsappNumber(input: string | undefined | null): string {
   if (digits.startsWith('0')) return `98${digits.slice(1)}`;
   return `98${digits}`;
 }
+
+/** Show ASCII digits as Persian digits (for display only; links keep ASCII digits). */
+export function toPersianDigits(input: string | number | undefined | null): string {
+  return String(input ?? '').replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
+}
