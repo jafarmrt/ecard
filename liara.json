@@ -1,0 +1,18 @@
+{
+  "platform": "docker",
+  "app": "roya-card-test",
+  "port": 3000,
+  "build": {
+    "dockerfile": "deploy/Dockerfile"
+  },
+  "disks": [
+    {
+      "name": "data",
+      "mountTo": "/app/data"
+    },
+    {
+      "name": "uploads",
+      "mountTo": "/app/public/uploads"
+    }
+  ]
+}
