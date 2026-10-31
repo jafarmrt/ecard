@@ -264,7 +264,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                   نام شرکت، مجموعه یا پروژه (اختیاری)
                 </label>
                 <div className="relative">
-                  <Building2 className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
+                  <Building2 className="w-4 h-4 text-stone-400 absolute start-3.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
                   <input
                     id="lead-company"
                     type="text"
@@ -273,7 +273,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                     value={customerCompany}
                     onChange={(e) => setCustomerCompany(e.target.value)}
                     placeholder="مثلاً: گروه معماری پارس / پروژه الهیه"
-                    className="w-full pl-9 pr-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden focus:border-[#D0192A] focus:bg-white transition-colors"
+                    className="w-full ps-9 pe-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden focus:border-[#D0192A] focus:bg-white transition-colors"
                   />
                 </div>
               </div>
@@ -301,7 +301,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                   })}
                 </div>
                 <div className="relative">
-                  <MessageSquare className="w-4 h-4 text-stone-400 absolute left-3.5 top-3" aria-hidden="true" />
+                  <MessageSquare className="w-4 h-4 text-stone-400 absolute start-3.5 top-3" aria-hidden="true" />
                   <textarea
                     rows={2}
                     maxLength={1000}
@@ -309,7 +309,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                     placeholder="توضیحات تکمیلی، کد سمپل مدنظر یا زمان مناسب تماس (اختیاری)"
-                    className="w-full pl-9 pr-3.5 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden focus:border-[#D0192A] focus:bg-white transition-colors resize-none"
+                    className="w-full ps-9 pe-3.5 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden focus:border-[#D0192A] focus:bg-white transition-colors resize-none"
                   />
                 </div>
               </fieldset>

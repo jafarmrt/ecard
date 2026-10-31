@@ -1,4 +1,5 @@
 import React from 'react';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { X, Navigation, MapPin, Copy, Check, ExternalLink, Compass, Settings2 } from 'lucide-react';
 import { EmployeeProfile } from '../types';
 import { DEFAULT_COORDINATES, formatCoordinateDMS } from '../utils/location';
@@ -18,6 +19,8 @@ export const NavigationModal: React.FC<NavigationModalProps> = ({
   onOpenLocationSettings 
 }) => {
   const [copied, setCopied] = React.useState(false);
+
+  useEscapeKey(isOpen, onClose);
 
   if (!isOpen) return null;
 
@@ -62,7 +65,9 @@ export const NavigationModal: React.FC<NavigationModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-200">
-      <div 
+      <div
+        role="dialog"
+        aria-modal="true"
         className="bg-slate-900 text-slate-100 w-full max-w-md rounded-3xl shadow-2xl relative border border-slate-800 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
@@ -79,7 +84,8 @@ export const NavigationModal: React.FC<NavigationModalProps> = ({
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            aria-label="بستن"
+            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-400"
           >
             <X className="w-5 h-5" />
           </button>
@@ -92,7 +98,7 @@ export const NavigationModal: React.FC<NavigationModalProps> = ({
               <MapPin className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <span className="leading-relaxed text-xs sm:text-sm text-slate-300 block">{profile.address}</span>
-                <div className="flex items-center gap-1.5 text-[11px] text-amber-400/90 font-mono" dir="ltr">
+                <div className="flex items-center gap-1.5 text-xs text-amber-400/90 font-mono" dir="ltr">
                   <Compass className="w-3 h-3 text-amber-400" />
                   <span>{formatCoordinateDMS(lat, lng)} ({lat.toFixed(6)}, {lng.toFixed(6)})</span>
                 </div>
@@ -147,7 +153,7 @@ export const NavigationModal: React.FC<NavigationModalProps> = ({
                 <div className="flex items-center gap-2">
                   <span>{app.name}</span>
                   {app.badge && (
-                    <span className="text-[10px] py-0.5 px-2 bg-white/20 rounded-full font-normal">
+                    <span className="text-xs py-0.5 px-2 bg-white/20 rounded-full font-normal">
                       {app.badge}
                     </span>
                   )}

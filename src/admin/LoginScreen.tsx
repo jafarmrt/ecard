@@ -65,7 +65,7 @@ export const LoginScreen: React.FC<{ onLoggedIn: () => void }> = ({ onLoggedIn }
             {loading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Lock className="w-4 h-4" aria-hidden="true" />}
             ورود
           </Button>
-          <p className="text-[11.5px] text-stone-500 text-center leading-relaxed">
+          <p className="text-xs text-stone-500 text-center leading-relaxed">
             این دستگاه تا ۳۰ روز وارد می‌ماند. روی دستگاه عمومی، بعد از کار «خروج» را بزنید.
           </p>
         </form>

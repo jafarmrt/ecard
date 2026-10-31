@@ -29,7 +29,7 @@ export const OfflineIndicator: React.FC = () => {
 
   if (showReconnected) {
     return (
-      <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-2xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xl animate-in fade-in slide-in-from-bottom duration-200 border border-emerald-400/30">
+      <div className="fixed bottom-4 start-4 z-50 flex items-center gap-2 rounded-2xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xl animate-in fade-in slide-in-from-bottom duration-200 border border-emerald-400/30">
         <Wifi className="h-4 w-4 text-emerald-200" />
         <span>اتصال مجدد برقرار شد (همگام‌سازی آنلاین)</span>
       </div>
@@ -39,7 +39,7 @@ export const OfflineIndicator: React.FC = () => {
   if (isOnline) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-2xl bg-amber-600/95 px-3.5 py-2 text-xs font-semibold text-white shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom duration-200 border border-amber-400/30">
+    <div className="fixed bottom-4 start-4 z-50 flex items-center gap-2 rounded-2xl bg-amber-600/95 px-3.5 py-2 text-xs font-semibold text-white shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom duration-200 border border-amber-400/30">
       <WifiOff className="h-4 w-4 text-amber-200 animate-pulse" />
       <span>حالت آفلاین — اطلاعات کارت از حافظه موقت لود شد</span>
     </div>

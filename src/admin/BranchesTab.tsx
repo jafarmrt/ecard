@@ -113,7 +113,7 @@ export const BranchesTab: React.FC<{
                 <p className="text-[14px] font-black text-stone-900 flex items-center gap-1.5">
                   {b.name}
                   {b.isDefault && (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-1.5">
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-1.5">
                       <Star className="w-3 h-3" aria-hidden="true" />
                       اصلی
                     </span>
@@ -125,7 +125,7 @@ export const BranchesTab: React.FC<{
                     {toPersianDigits(b.landline)}
                   </p>
                 )}
-                <p className="text-[11.5px] text-stone-500 mt-1">{formatNumber(cardsIn(b.id))} کارت</p>
+                <p className="text-xs text-stone-500 mt-1">{formatNumber(cardsIn(b.id))} کارت</p>
               </div>
               <MapPin className="w-5 h-5 text-[#D0192A] shrink-0" aria-hidden="true" />
             </div>

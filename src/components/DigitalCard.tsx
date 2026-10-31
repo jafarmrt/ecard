@@ -293,7 +293,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
         </div>
 
         {/* 3. Name and title */}
-        <h1 className="mt-3.5 text-2xl sm:text-[25px] font-black text-stone-800 tracking-tight text-center">{profile.name}</h1>
+        <h1 className="mt-3.5 text-2xl sm:text-[25px] font-black text-stone-800 text-center">{profile.name}</h1>
         <div className="w-12 h-[2.5px] bg-[#D0192A] rounded-full mx-auto mt-2 mb-2.5" aria-hidden="true" />
         {profile.title && (
           <p className="text-[13.5px] text-stone-600 font-medium text-center leading-normal">{profile.title}</p>
@@ -393,7 +393,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
                 <span className="text-emerald-700 font-bold">در حال دانلود کاتالوگ...</span>
               ) : (
                 <>
-                  {catalogLabel} <span className="text-[10px] bg-red-50 text-[#D0192A] px-1.5 rounded font-bold border border-red-100">PDF</span>
+                  {catalogLabel} <span className="text-xs bg-red-50 text-[#D0192A] px-1.5 rounded font-bold border border-red-100">PDF</span>
                 </>
               )}
             </span>
@@ -443,7 +443,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
                 <Contact className="w-5 h-5 text-white" />
               </span>
               <span className="flex flex-col" style={{ textAlign: 'start' }}>
-                <span className="text-base sm:text-[17px] font-bold tracking-tight">ذخیره در مخاطبین</span>
+                <span className="text-base sm:text-[17px] font-bold">ذخیره در مخاطبین</span>
                 <span className="text-[12px] text-white/90 font-light mt-0.5">افزودن اطلاعات به مخاطبین گوشی شما</span>
               </span>
             </span>
@@ -474,7 +474,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
               </span>
               <span className="flex flex-col" style={{ textAlign: 'start' }}>
                 <span className="text-[13.5px] font-bold">ارسال شماره شما برای کارشناس</span>
-                <span className="text-[11.5px] text-stone-300 font-normal">تبادل کارت ویزیت و ثبت درخواست تماس</span>
+                <span className="text-xs text-stone-300 font-normal">تبادل کارت ویزیت و ثبت درخواست تماس</span>
               </span>
             </span>
             {isLtr ? (

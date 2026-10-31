@@ -17,7 +17,7 @@ const StatTile: React.FC<{ label: string; value: number; hint?: string }> = ({ l
   <div className="bg-white border border-stone-200 rounded-2xl p-3.5">
     <p className="text-[12px] text-stone-600 font-medium">{label}</p>
     <p className="text-[22px] font-black text-stone-900 mt-0.5 tabular-nums">{formatNumber(value)}</p>
-    {hint && <p className="text-[11px] text-stone-500">{hint}</p>}
+    {hint && <p className="text-xs text-stone-500">{hint}</p>}
   </div>
 );
 
@@ -65,7 +65,7 @@ const DailyChart: React.FC<{ days: Day[] }> = ({ days }) => {
           })}
         </div>
       </div>
-      <div className="flex justify-between text-[11px] text-stone-500 mt-1 tabular-nums" dir="ltr">
+      <div className="flex justify-between text-xs text-stone-500 mt-1 tabular-nums" dir="ltr">
         <span>{days[0] && new Date(days[0].day).toLocaleDateString('fa-IR', { day: 'numeric', month: 'short' })}</span>
         <span>{days.at(-1) && new Date(days.at(-1)!.day).toLocaleDateString('fa-IR', { day: 'numeric', month: 'short' })}</span>
       </div>

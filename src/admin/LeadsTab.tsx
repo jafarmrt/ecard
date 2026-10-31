@@ -110,11 +110,11 @@ export const LeadsTab: React.FC = () => {
     >
       <div className="flex flex-wrap gap-2 mb-3">
         <div className="relative flex-1 min-w-[200px]">
-          <Search className="w-4 h-4 text-stone-400 absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+          <Search className="w-4 h-4 text-stone-400 absolute start-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
           <input
             type="search"
             aria-label="جستجو در درخواست‌ها"
-            className={`${inputClass} pr-9`}
+            className={`${inputClass} ps-9`}
             placeholder="نام، شماره، شرکت یا کارشناس"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
