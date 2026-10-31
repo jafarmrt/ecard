@@ -17,7 +17,8 @@ SyslogIdentifier=roya-card
 # متغیرهای محیطی سیستم
 Environment=NODE_ENV=production
 Environment=PORT=3000
-Environment=ADMIN_PASSWORD=roya1403
+# رمز مدیر و کلید نشست در فایل .env (هرگز در این فایل ننویسید)
+EnvironmentFile=-/var/www/roya-card/.env
 
 # محدودیت‌های امنیتی لینوکس
 NoNewPrivileges=true

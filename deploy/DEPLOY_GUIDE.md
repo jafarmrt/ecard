@@ -10,7 +10,7 @@
 - پردازنده: ۱ هسته
 - فضای دیسک: ۱۰ گیگابایت SSD
 - وب‌سرور: **Nginx**
-- محیط اجرایی: **Node.js 20 LTS** یا **22 LTS**
+- محیط اجرایی: **Node.js 22.13 یا بالاتر** (پایگاه داده SQLite داخلی Node از این نسخه به بعد است)
 
 ---
 
@@ -40,9 +40,18 @@ sudo chown -R $USER:$USER /var/www/roya-card
 # کپی فایل‌های پروژه به مسیر /var/www/roya-card (یا کلون از گیت‌هاب)
 cd /var/www/roya-card
 
+# تنظیم رمز مدیر و کلید نشست (فقط بار اول)
+cp .env.example .env
+nano .env   # ADMIN_PASSWORD (حداقل ۱۰ کاراکتر) و SESSION_SECRET را پر کنید
+
 # نصب پکیج‌ها و بیلد فرانت‌اند و بک‌اند
-npm install
+npm ci
 npm run build
+```
+
+برای ساخت SESSION_SECRET تصادفی:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 ---
@@ -96,6 +105,55 @@ docker compose up -d --build
 ---
 
 ## ۷. رمز عبور مدیریت و تنظیمات امنیتی
-- **رمز عبور پیش‌فرض مدیریت:** `roya1403`
-- جهت تغییر رمز عبور در سرور، می‌توانید در فایل `.env` متغیر `ADMIN_PASSWORD=your_secure_password` را قرار دهید یا مستقیماً از داخل پنل مدیریت سایت اقدام به تغییر نمایید.
-- دیتابیس در مسیر `/var/www/roya-card/data/database.json` ذخیره می‌شود و با هر تغییر در پنل کاربری، بلافاصله روی دیسک ماندگار می‌گردد.
+- رمز پیش‌فرض وجود ندارد. رمز مدیر را در فایل `.env` با `ADMIN_PASSWORD` تعیین کنید یا بعد از ورود از پنل مدیریت عوض کنید.
+- رمزهای قدیمی و عمومی `roya1403`، `admin123` و `roya2026` دیگر پذیرفته نمی‌شوند، حتی اگر در دیتابیس قدیمی ذخیره شده باشند.
+- اگر رمز را فراموش کردید، روی سرور (بعد از `npm run build`) اجرا کنید: `npm run admin:password -- "رمز-جدید"`
+- اگر هنگام اولین اجرا `ADMIN_PASSWORD` تعیین نشده باشد، یک رمز موقت تصادفی در لاگ سرور چاپ می‌شود.
+- پایگاه داده در `data/roya.db` (SQLite) و فایل‌های آپلودشده در `public/uploads/` نگه‌داری می‌شوند. هیچ‌کدام در گیت ذخیره نمی‌شوند.
+- رمز مدیر حداقل ۱۰ کاراکتر است. ورود با کوکی امن انجام می‌شود و هر دستگاه تا ۳۰ روز وارد می‌ماند. پنل مدیریت در نشانی `/admin` است.
+- فایل بکاپی که از پنل گرفته می‌شود دیگر رمز یا کلید نشست ندارد.
+
+## ۸. به‌روزرسانی سروری که نسخه قبلی روی آن نصب است
+از نسخه 2.3.0 فایل `data/database.json` از گیت حذف شده تا داده واقعی و کلیدها در مخزن نباشند. یک بار به این ترتیب به‌روزرسانی کنید تا داده‌ها حفظ شوند:
+```bash
+cd /var/www/roya-card
+cp data/database.json ~/roya-db-backup-$(date +%F).json   # بکاپ
+git checkout -- data/database.json                         # تا git pull خطا ندهد
+git pull
+cp ~/roya-db-backup-$(date +%F).json data/database.json    # برگرداندن داده واقعی
+
+cp .env.example .env && nano .env   # ADMIN_PASSWORD و SESSION_SECRET
+npm ci && npm run build
+pm2 restart roya-smart-card   # یا: sudo systemctl restart roya-card
+```
+- بعد از این به‌روزرسانی همه مدیرها یک بار از پنل خارج می‌شوند و باید دوباره وارد شوند.
+- در Docker هم فایل `.env` را کنار `package.json` بسازید؛ `docker-compose.yml` آن را می‌خواند.
+
+---
+
+## ۹. پشتیبان‌گیری و آزمایش بازیابی
+- خود برنامه هر روز یک نسخه از پایگاه داده در `data/backups` می‌سازد و ۱۴ نسخه آخر را نگه می‌دارد. با `BACKUP_DIR` در `.env` می‌توانید این پوشه را روی دیسک دیگری بگذارید.
+- برای نگهداری بیرون از سرور، `deploy/backup-cron.sh` را در crontab بگذارید و مقصد را با `BACKUP_REMOTE` بدهید (rclone یا rsync):
+```bash
+sudo crontab -e
+# هر شب ساعت ۳:
+0 3 * * * BACKUP_REMOTE=arvan:roya-backups /var/www/roya-card/deploy/backup-cron.sh >> /var/log/roya-backup.log 2>&1
+```
+- ماهی یک بار بازیابی را آزمایش کنید (به سرور اصلی دست نمی‌زند): `npm run verify-backup`
+- از پنل، بخش «سیستم»، هم می‌توانید فایل پشتیبان را دانلود کنید. بازیابی از فایل قبل از جایگزینی، تفاوت‌ها را نشان می‌دهد و یک نسخه از اطلاعات فعلی را خودکار نگه می‌دارد.
+
+## ۱۰. به‌روزرسانی به نسخه 3.0.0 (پایگاه داده SQLite)
+1. **قبل از هر کار** از `data/database.json` و `public/uploads` یک کپی بگیرید.
+2. Node.js را به 22.13 یا بالاتر برسانید: `node -v`
+3. کد را به‌روز کنید و بسازید:
+```bash
+cd /var/www/roya-card
+cp data/database.json ~/roya-db-before-v3-$(date +%F).json
+git pull
+npm ci && npm run build
+pm2 restart roya-smart-card   # یا: sudo systemctl restart roya-card
+```
+4. در اولین اجرا، `data/database.json` خودکار به `data/roya.db` منتقل می‌شود و فایل قدیمی با نام `database.json.imported-تاریخ` کنار آن می‌ماند. در لاگ سرور پیام `Imported N cards` را ببینید.
+5. اطلاعات مشترک (نام شرکت، وب‌سایت، اینستاگرام، کاتالوگ) از روی کارت‌ها استخراج می‌شود و در بخش «شرکت» پنل قرار می‌گیرد؛ آدرس‌ها به «شعبه‌ها» می‌روند. یک بار هر دو بخش را نگاه کنید.
+6. همه مدیرها یک بار باید دوباره وارد شوند (ورود حالا با کوکی است). اگر رمز فعلی کمتر از ۱۰ کاراکتر است، همچنان کار می‌کند، اما رمز جدید باید ۱۰ کاراکتر یا بیشتر باشد.
+7. پنل مدیریت از این نسخه در `/admin` است (`/?admin=1` هم به آن‌جا می‌رود).

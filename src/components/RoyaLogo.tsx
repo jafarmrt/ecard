@@ -1,22 +1,16 @@
-import React, { useRef } from 'react';
-import { Camera, Image as ImageIcon, RotateCcw } from 'lucide-react';
+import React from 'react';
 
 interface RoyaLogoProps {
   className?: string;
   size?: 'sm' | 'md' | 'lg';
   logoUrl?: string;
-  editable?: boolean;
-  onLogoChange?: (url: string | undefined) => void;
 }
 
 export const RoyaLogo: React.FC<RoyaLogoProps> = ({ 
   className = '', 
   size = 'md',
   logoUrl,
-  editable = false,
-  onLogoChange,
 }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sizeStyles = {
     sm: 'w-[180px]',
@@ -24,43 +18,22 @@ export const RoyaLogo: React.FC<RoyaLogoProps> = ({
     lg: 'w-[260px]',
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && onLogoChange) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          onLogoChange(event.target.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   return (
     <div className={`relative group flex flex-col items-center select-none ${sizeStyles[size]} ${className}`}>
-      {editable && (
-        <input 
-          ref={fileInputRef}
-          type="file" 
-          accept="image/*" 
-          className="hidden" 
-          onChange={handleFileSelect}
-        />
-      )}
-
       {logoUrl ? (
         /* Custom Uploaded Brand Logo */
         <div className="relative flex flex-col items-center justify-center p-1 w-full">
           <img 
             src={logoUrl} 
-            alt="Company Brand Logo" 
+            alt="لوگوی شرکت" 
             className="max-h-24 max-w-full object-contain drop-shadow-xs transition-transform duration-200"
           />
         </div>
       ) : (
         /* Exact Vector Rendering of ROYA Surface Center Logo from Brand Asset */
         <svg 
+          role="img"
+          aria-label="ROYA Surface Center"
           viewBox="0 0 320 185" 
           className="w-full h-auto overflow-visible"
           xmlns="http://www.w3.org/2000/svg"
@@ -123,30 +96,6 @@ export const RoyaLogo: React.FC<RoyaLogoProps> = ({
         </svg>
       )}
 
-      {/* Interactive Overlay Button for changing logo directly on the card */}
-      {editable && onLogoChange && (
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-stone-900/60 rounded-xl backdrop-blur-xs p-2 gap-1.5">
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="py-1.5 px-3 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-md transition-transform active:scale-95 cursor-pointer"
-            title="آپلود لوگوی تصویری جدید"
-          >
-            <Camera className="w-3.5 h-3.5" />
-            <span>تغییر لوگو</span>
-          </button>
-          {logoUrl && (
-            <button
-              type="button"
-              onClick={() => onLogoChange(undefined)}
-              className="p-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg text-xs shadow-md transition-transform active:scale-95 cursor-pointer"
-              title="بازگشت به لوگوی اصلی رویا"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      )}
     </div>
   );
 };

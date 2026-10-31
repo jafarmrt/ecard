@@ -28,76 +28,27 @@ export function getQueryCardUrl(profile: EmployeeProfile): string {
   return `${origin}/?id=${profile.id}&view=card`;
 }
 
+export type AppRoute = { kind: 'admin' } | { kind: 'card'; identifier: string } | { kind: 'landing' };
+
 /**
- * Parses the current URL to detect if a specific employee card is requested
- * and whether the view should be standalone customer card mode.
+ * Which screen the current URL asks for:
+ * /admin (or the old ?admin=1) -> admin panel, /:slug, /card/:slug or ?id=… -> a card, / -> landing page.
  */
-export function parseCurrentRoute(profiles: EmployeeProfile[]): {
-  targetProfileId: string | null;
-  isStandalone: boolean;
-  isAdminMode: boolean;
-} {
-  if (typeof window === 'undefined') {
-    return { targetProfileId: null, isStandalone: false, isAdminMode: false };
+export function resolveRoute(): AppRoute {
+  if (typeof window === 'undefined') return { kind: 'landing' };
+  const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
+  const params = new URLSearchParams(window.location.search);
+  const adminParam = params.get('admin');
+  if (path === 'admin' || path.startsWith('admin/') || adminParam === '1' || adminParam === 'true') {
+    if (path !== 'admin') window.history.replaceState(null, '', '/admin');
+    return { kind: 'admin' };
   }
-
-  try {
-    const pathname = window.location.pathname.replace(/^\/+|\/+$/g, ''); // strip leading/trailing slashes
-    const searchParams = new URLSearchParams(window.location.search);
-
-    const queryId = searchParams.get('id') || searchParams.get('card') || searchParams.get('profile');
-    const viewParam = searchParams.get('view') || searchParams.get('mode');
-    const isAdminRequested = searchParams.get('admin') === 'true' || searchParams.get('admin') === '1';
-
-    // 1. Check if pathname specifies a route
-    // Allowed patterns:
-    // "" -> Home / Workspace (unless view=card)
-    // "card/:slugOrId" -> Standalone card
-    // ":slugOrId" -> Standalone card (if matches a profile or if not a known asset)
-    let pathIdentifier: string | null = null;
-    let isCardPath = false;
-
-    if (pathname.startsWith('card/')) {
-      pathIdentifier = pathname.replace(/^card\//, '').trim();
-      isCardPath = true;
-    } else if (pathname && !pathname.includes('.') && pathname !== 'api' && pathname !== 'uploads') {
-      pathIdentifier = pathname.trim();
-      isCardPath = true;
-    }
-
-    const identifier = queryId || pathIdentifier;
-
-    // Find matching profile in list
-    let matchedProfile: EmployeeProfile | undefined;
-    if (identifier) {
-      const clean = identifier.toLowerCase();
-      matchedProfile = profiles.find((p) => {
-        const pId = p.id.toLowerCase();
-        const pSlug = (p.slug || '').toLowerCase();
-        const pEnName = (p.nameEn || '').toLowerCase().replace(/\s+/g, '-');
-        return pId === clean || (pSlug && pSlug === clean) || (pEnName && pEnName === clean);
-      });
-    }
-
-    // Determine standalone view:
-    // It's standalone if:
-    // - view param is 'card', 'standalone', 'mobile', or 'vcard'
-    // - OR accessed via path like /amir-tajik or /card/amir-tajik
-    // - AND admin is NOT explicitly requested via ?admin=true
-    const isStandalone = !isAdminRequested && (
-      viewParam === 'card' || 
-      viewParam === 'standalone' || 
-      viewParam === 'mobile' || 
-      (isCardPath && (!!matchedProfile || !isAdminRequested))
-    );
-
-    return {
-      targetProfileId: matchedProfile ? matchedProfile.id : (identifier || null),
-      isStandalone,
-      isAdminMode: isAdminRequested,
-    };
-  } catch (err) {
-    console.warn('Error parsing current route:', err);
-    return { targetProfileId: null, isStandalone: false, isAdminMode: false };
+  const queryId = params.get('id') || params.get('card') || params.get('profile');
+  if (queryId) return { kind: 'card', identifier: queryId.trim() };
+  if (path.startsWith('card/')) {
+    const id = path.slice(5).trim();
+    if (id) return { kind: 'card', identifier: decodeURIComponent(id) };
   }
+  if (path && !path.includes('/') && !path.includes('.')) return { kind: 'card', identifier: decodeURIComponent(path) };
+  return { kind: 'landing' };
 }

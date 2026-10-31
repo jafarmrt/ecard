@@ -1,602 +1,503 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Phone, 
-  MessageCircle, 
-  PhoneCall, 
-  Instagram, 
-  Globe, 
-  BookOpen, 
-  Mail, 
-  MapPin, 
-  Download, 
-  ChevronLeft, 
+import {
+  Phone,
+  MessageCircle,
+  PhoneCall,
+  Instagram,
+  Globe,
+  BookOpen,
+  Mail,
+  MapPin,
+  Download,
+  ChevronLeft,
   ChevronRight,
-  Contact, 
-  User, 
+  Contact,
+  User,
   Check,
-  Sparkles,
-  Camera,
   FileDown,
   UserPlus,
-  Share2
+  Share2,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import confetti from 'canvas-confetti';
 import { EmployeeProfile } from '../types';
 import { RoyaLogo } from './RoyaLogo';
 import { LeadCaptureModal } from './LeadCaptureModal';
 import { downloadVCard } from '../utils/vcard';
-import { downloadCatalogPdf } from '../utils/catalog';
-import { api } from '../services/api';
-import { optimizeImage } from '../utils/imageOptimizer';
+import { downloadCatalogPdf, resolveCatalogUrl } from '../utils/catalog';
+import { api, AnalyticsEventName } from '../services/api';
 import { getBaseOrigin } from '../utils/url';
+import { telHref, whatsappNumber, toPersianDigits } from '../utils/phone';
 
 interface DigitalCardProps {
   profile: EmployeeProfile;
   onOpenNavigation: () => void;
   onOpenShare: () => void;
   onOpenNfc: () => void;
-  onUpdateAvatar?: (avatarDataUrl: string) => void;
-  onUpdateLogo?: (logoDataUrl: string | undefined) => void;
   isStandalone?: boolean;
   isAdmin?: boolean;
 }
+
+/** Instagram handle shown on the card, derived from the URL when one is set so text and link always match. */
+export function instagramDisplay(profile: EmployeeProfile): { handle: string; href: string } | null {
+  const fromUrl = (profile.instagramUrl || '').match(/instagram\.com\/([A-Za-z0-9._]+)/i)?.[1];
+  const fromHandle = (profile.instagram || '')
+    .trim()
+    .replace(/^@/, '')
+    .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
+    .replace(/\/.*$/, '');
+  const handle = fromUrl || fromHandle;
+  if (!handle) return null;
+  return { handle, href: `https://www.instagram.com/${handle}` };
+}
+
+function websiteDisplay(profile: EmployeeProfile): { label: string; href: string } | null {
+  const raw = (profile.websiteUrl || profile.website || '').trim();
+  if (!raw) return null;
+  const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  const label = (profile.website || raw).replace(/^https?:\/\//i, '').replace(/\/$/, '');
+  return { label, href };
+}
+
+const tileBase =
+  'bg-white rounded-2xl border border-stone-200/90 hover:border-red-300 hover:bg-stone-50/40 transition-all item-card-shadow group focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#D0192A]';
+
+/** Half-width tile: icon + label on the first line, the value on its own full-width line so phone numbers are never cut off. */
+const HalfTile: React.FC<{
+  id: string;
+  href: string;
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+  ltrValue?: boolean;
+  external?: boolean;
+  ariaLabel: string;
+  onClick?: () => void;
+}> = ({ id, href, label, value, icon, ltrValue = true, external, ariaLabel, onClick }) => (
+  <a
+    id={id}
+    href={href}
+    onClick={onClick}
+    aria-label={ariaLabel}
+    {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+    className={`${tileBase} flex flex-col gap-1.5 p-3 active:scale-[0.98] min-w-0`}
+  >
+    <span className="flex items-center gap-2 text-[#D0192A]">
+      <span aria-hidden="true">{icon}</span>
+      <span className="text-[12px] text-stone-500 font-medium">{label}</span>
+    </span>
+    <span
+      className="text-[14px] text-stone-800 font-bold tabular-nums whitespace-nowrap overflow-hidden text-ellipsis"
+      dir={ltrValue ? 'ltr' : undefined}
+      style={{ textAlign: 'start' }}
+    >
+      <bdi>{value}</bdi>
+    </span>
+  </a>
+);
+
+/** Full-width tile with a chevron. */
+const WideTile: React.FC<{
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  isLtr: boolean;
+  children: React.ReactNode;
+  trailing?: React.ReactNode;
+  ariaLabel: string;
+  href?: string;
+  external?: boolean;
+  onClick?: (e: React.MouseEvent) => void;
+}> = ({ id, label, icon, isLtr, children, trailing, ariaLabel, href, external, onClick }) => {
+  const Chevron = isLtr ? ChevronRight : ChevronLeft;
+  const content = (
+    <>
+      <span className="flex items-center gap-3 min-w-0">
+        <span className="w-9 h-9 flex items-center justify-center text-[#D0192A] shrink-0" aria-hidden="true">
+          {icon}
+        </span>
+        <span className="flex flex-col min-w-0" style={{ textAlign: 'start' }}>
+          <span className="text-[12px] text-stone-500 font-medium leading-none mb-1">{label}</span>
+          {children}
+        </span>
+      </span>
+      <span className="flex items-center gap-1 shrink-0" aria-hidden="true">
+        {trailing}
+        <Chevron className="w-4 h-4 text-stone-400 group-hover:text-[#D0192A] transition-colors" />
+      </span>
+    </>
+  );
+  const className = `${tileBase} w-full flex items-center justify-between gap-2 p-3.5 sm:p-4 active:scale-[0.99] cursor-pointer`;
+  if (href) {
+    return (
+      <a
+        id={id}
+        href={href}
+        onClick={onClick}
+        aria-label={ariaLabel}
+        className={className}
+        {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      >
+        {content}
+      </a>
+    );
+  }
+  return (
+    <button id={id} type="button" onClick={onClick} aria-label={ariaLabel} className={className}>
+      {content}
+    </button>
+  );
+};
 
 export const DigitalCard: React.FC<DigitalCardProps> = ({
   profile,
   onOpenNavigation,
   onOpenShare,
-  onOpenNfc,
-  onUpdateAvatar,
-  onUpdateLogo,
   isStandalone = false,
   isAdmin = false,
 }) => {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [catalogDownloading, setCatalogDownloading] = useState(false);
   const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
-  const cardFileInputRef = useRef<HTMLInputElement>(null);
-  const canEdit = isAdmin && !isStandalone;
-
-  // Track initial page view / NFC tap / QR scan once per session
-  useEffect(() => {
-    if (!profile?.id) return;
+  const [showStickyBar, setShowStickyBar] = useState(false);
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+  // Where the visitor came from (?src=nfc|qr|link, ?c=campaign); read once before the URL is cleaned.
+  const visitRef = useRef<{ source: string; campaign: string } | null>(null);
+  if (visitRef.current === null) {
+    let source = 'link';
+    let campaign = '';
     try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const src = urlParams.get('src') || urlParams.get('ref') || '';
-      
-      let eventType: 'view' | 'nfcTap' | 'qrScan' = 'view';
-      if (src === 'nfc') {
-        eventType = 'nfcTap';
-      } else if (src === 'qr') {
-        eventType = 'qrScan';
-      }
-
-      // Check if already counted in this session to prevent spam reloads
-      const sessionKey = `roya_view_logged_${profile.id}_${eventType}`;
-      if (!sessionStorage.getItem(sessionKey)) {
-        sessionStorage.setItem(sessionKey, 'true');
-        api.trackAnalyticsEvent(profile.id, eventType);
-      }
+      const params = new URLSearchParams(window.location.search);
+      const src = (params.get('src') || params.get('ref') || '').toLowerCase();
+      if (src === 'nfc' || src === 'qr') source = src;
+      campaign = (params.get('c') || params.get('campaign') || '').slice(0, 60);
     } catch {
       // ignore
     }
-  }, [profile?.id]);
+    visitRef.current = { source, campaign };
+  }
+
+  // Only real visitors are counted: not the admin panel preview and not a logged-in admin.
+  const shouldTrack = isStandalone && !isAdmin;
+
+  const track = (event: AnalyticsEventName) => {
+    if (shouldTrack) void api.trackAnalyticsEvent(profile.id, event, visitRef.current ?? undefined);
+  };
+
+  // Count the visit once per browser session, then drop ?src / ?c so a re-shared link is not counted as a QR/NFC scan.
+  useEffect(() => {
+    if (!profile?.id || !isStandalone) return;
+    try {
+      if (!isAdmin) {
+        const sessionKey = `roya_view_logged_${profile.id}`;
+        if (!sessionStorage.getItem(sessionKey)) {
+          sessionStorage.setItem(sessionKey, '1');
+          void api.trackAnalyticsEvent(profile.id, 'view', visitRef.current ?? undefined);
+        }
+      }
+      const url = new URL(window.location.href);
+      let changed = false;
+      for (const key of ['src', 'ref', 'c', 'campaign']) {
+        if (url.searchParams.has(key)) {
+          url.searchParams.delete(key);
+          changed = true;
+        }
+      }
+      if (changed) window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+    } catch {
+      // ignore (private mode, old browsers)
+    }
+  }, [profile?.id, isStandalone, isAdmin]);
+
+  // Sticky action bar: shown on the public card page once the main "save contact" button scrolls out of view.
+  useEffect(() => {
+    if (!isStandalone || !saveButtonRef.current || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowStickyBar(!entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(saveButtonRef.current);
+    return () => observer.disconnect();
+  }, [isStandalone]);
 
   const isLtr = profile.layoutDirection === 'ltr';
+  const telMobile = telHref(profile.mobile);
+  const telLandline = telHref(profile.landline);
+  const waNumber = whatsappNumber(profile.whatsapp);
+  const instagram = instagramDisplay(profile);
+  const website = websiteDisplay(profile);
+  const catalogHref = resolveCatalogUrl(profile);
+  const catalogLabel =
+    profile.catalogUrl && !/^\/|\.pdf$/i.test(profile.catalogUrl)
+      ? profile.catalogUrl.replace(/^https?:\/\//, '').replace(/\/$/, '')
+      : 'دانلود کاتالوگ محصولات';
 
-  const toEnglishDigits = (str: string) => {
-    if (!str) return '';
-    return str
-      .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
-      .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
-  };
-
-  // Clean and format phone numbers for direct one-tap dialing (tel: protocol)
-  const telMobile = toEnglishDigits(profile.mobile).replace(/[^0-9+]/g, '');
-  const telLandline = toEnglishDigits(profile.landline).replace(/[^0-9+]/g, '');
-
-  // Format WhatsApp number with international country code (98)
-  const rawWhatsappDigits = toEnglishDigits(profile.whatsapp).replace(/[^0-9]/g, '');
-  const cleanWhatsapp = rawWhatsappDigits.startsWith('0')
-    ? '98' + rawWhatsappDigits.substring(1)
-    : rawWhatsappDigits.startsWith('98')
-      ? rawWhatsappDigits
-      : '98' + rawWhatsappDigits;
-
-  // Format Instagram URL and handle
-  const rawInstagram = (profile.instagram || 'royco').trim();
-  const cleanInstagramHandle = rawInstagram
-    .replace(/^@/, '')
-    .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
-    .replace(/\/$/, '')
-    .trim();
-  const displayInstagramHandle = cleanInstagramHandle || 'Royco';
-  const instagramHref = profile.instagramUrl && profile.instagramUrl.startsWith('http')
-    ? profile.instagramUrl
-    : `https://www.instagram.com/${displayInstagramHandle.toLowerCase() === 'royco' ? 'royaco' : displayInstagramHandle}`;
-
-  // Format Website URL
-  const displayWebsite = profile.website || 'www.royaco.com';
-  const websiteHref = profile.websiteUrl && profile.websiteUrl.startsWith('http')
-    ? profile.websiteUrl
-    : profile.website?.startsWith('http')
-      ? profile.website
-      : `https://${displayWebsite}`;
-
-  // Format Catalog Display Name
-  const displayCatalog = profile.catalogUrl 
-    ? profile.catalogUrl.replace(/^https?:\/\//, '').replace(/\/$/, '')
-    : 'دانلود کاتالوگ PDF رویا';
-
-  // Exact Standalone Card URL for QR Code (with ?src=qr)
   const identifier = (profile.slug || profile.id).trim();
-  const origin = getBaseOrigin();
-  const cardUrl = `${origin}/${identifier}?src=qr`;
-
-  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && onUpdateAvatar) {
-      if (!file.type.startsWith('image/')) {
-        return;
-      }
-      try {
-        const optimized = await optimizeImage(file, {
-          maxWidth: 400,
-          maxHeight: 400,
-          quality: 0.82,
-          format: 'image/webp',
-        });
-        onUpdateAvatar(optimized.dataUrl);
-      } catch {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const result = event.target?.result as string;
-          if (result) {
-            onUpdateAvatar(result);
-          }
-        };
-        reader.readAsDataURL(file);
-      }
-    }
-  };
+  const cardUrl = `${getBaseOrigin()}/${identifier}?src=qr`;
 
   const handleSaveContact = async () => {
-    api.trackAnalyticsEvent(profile.id, 'vcardDownload');
-    try {
-      confetti({
-        particleCount: 60,
-        spread: 60,
-        origin: { y: 0.75 },
-        colors: ['#D0192A', '#E53E3E', '#FF6B6B', '#10B981', '#3B82F6'],
-      });
-    } catch {
-      // ignore
-    }
-
+    track('vcardDownload');
     const ok = await downloadVCard(profile);
     if (ok) {
       setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 3500);
+      setTimeout(() => setSavedSuccess(false), 6000);
     }
   };
 
   const handleDownloadCatalog = (e: React.MouseEvent) => {
     e.preventDefault();
-    api.trackAnalyticsEvent(profile.id, 'catalogDownload');
+    track('catalogDownload');
     setCatalogDownloading(true);
-    try {
-      confetti({
-        particleCount: 40,
-        spread: 50,
-        origin: { y: 0.6 },
-        colors: ['#D0192A', '#FFAA00', '#10B981'],
-      });
-    } catch {
-      // ignore
-    }
-
     downloadCatalogPdf(profile);
-    setTimeout(() => {
-      setCatalogDownloading(false);
-    }, 2500);
+    setTimeout(() => setCatalogDownloading(false), 2500);
   };
 
   const handleOpenRouting = () => {
-    api.trackAnalyticsEvent(profile.id, 'mapClick');
+    track('mapClick');
     onOpenNavigation();
   };
 
+  const hasRow1 = !!telMobile || !!waNumber;
+  const hasRow2 = !!telLandline || !!instagram;
+  const isIOS = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   return (
-    <div className="w-full max-w-[430px] mx-auto bg-white rounded-3xl p-5 sm:p-7 card-shadow border border-stone-100/90 select-none transition-all duration-300">
-      {/* Hidden file input for quick direct avatar upload from card (Admin Only) */}
-      {canEdit && (
-        <input 
-          ref={cardFileInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={handleAvatarFileChange}
-        />
-      )}
-
-      {/* 1. Header & ROYA Surface Center Brand Logo */}
+    <>
+    <div
+      className="w-full max-w-[430px] mx-auto bg-white rounded-3xl p-4 sm:p-7 card-shadow border border-stone-100/90 transition-all duration-300"
+      dir={isLtr ? 'ltr' : 'rtl'}
+    >
+      {/* 1. Brand logo */}
       <div className="pt-2 pb-5 flex flex-col items-center">
-        <RoyaLogo 
-          size="md" 
-          logoUrl={profile.logoUrl}
-          editable={canEdit}
-          onLogoChange={onUpdateLogo}
-        />
+        <RoyaLogo size="md" logoUrl={profile.logoUrl} />
       </div>
 
-      {/* 2. Profile Avatar Circle */}
+      {/* 2. Avatar */}
       <div className="flex flex-col items-center justify-center">
-        <div className="relative group">
-          <div 
-            onClick={() => {
-              if (canEdit) cardFileInputRef.current?.click();
-            }}
-            className={`w-24 h-24 sm:w-26 sm:h-26 rounded-full border border-stone-200 flex items-center justify-center bg-white shadow-xs p-1 relative overflow-hidden transition-all ${
-              canEdit ? 'cursor-pointer hover:border-[#D0192A]' : ''
-            }`}
-            title={canEdit ? 'کلیک برای تغییر تصویر پرسنلی' : profile.name}
-          >
-            {profile.avatarUrl ? (
-              <img 
-                src={profile.avatarUrl} 
-                alt={profile.name} 
-                className="w-full h-full rounded-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="w-full h-full rounded-full bg-stone-50/50 flex items-center justify-center text-stone-400">
-                <User className="w-13 h-13 stroke-[1.2] text-stone-400" />
-              </div>
-            )}
-
-            {/* Hover overlay for editing avatar (Admin Only) */}
-            {canEdit && (
-              <div className="absolute inset-0 bg-stone-900/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white text-[10px] font-medium transition-all">
-                <Camera className="w-4 h-4 text-red-400 mb-0.5" />
-                <span>تغییر عکس</span>
-              </div>
-            )}
-          </div>
-
-          {canEdit && (
-            <button
-              onClick={() => cardFileInputRef.current?.click()}
-              title="آپلود تصویر پرسنلی"
-              className="absolute -bottom-1 -left-1 w-7 h-7 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-md border-2 border-white transition-transform active:scale-95 cursor-pointer"
-            >
-              <Camera className="w-3.5 h-3.5 text-white" />
-            </button>
+        <div className="w-24 h-24 sm:w-26 sm:h-26 rounded-full border border-stone-200 flex items-center justify-center bg-white shadow-xs p-1 overflow-hidden">
+          {profile.avatarUrl ? (
+            <img
+              src={profile.avatarUrl}
+              alt={`تصویر ${profile.name}`}
+              width={104}
+              height={104}
+              className="w-full h-full rounded-full object-cover"
+              referrerPolicy="no-referrer"
+              decoding="async"
+              fetchPriority="high"
+            />
+          ) : (
+            <div className="w-full h-full rounded-full bg-stone-50/50 flex items-center justify-center text-stone-400">
+              <User className="w-13 h-13 stroke-[1.2] text-stone-400" aria-hidden="true" />
+            </div>
           )}
         </div>
 
-        {/* 3. Name, Red Underline Accent, & Job Title */}
-        <h2 className="mt-3.5 text-2xl sm:text-[25px] font-black text-stone-800 tracking-tight text-center">
-          {profile.name}
-        </h2>
-        
-        {/* Distinct Red Accent Line below Name */}
-        <div className="w-12 h-[2.5px] bg-[#D0192A] rounded-full mx-auto mt-2 mb-2.5" />
-
-        <p className="text-xs sm:text-[13.5px] text-stone-500 font-medium text-center leading-normal">
-          {profile.title}
-        </p>
-        <p className="text-xs sm:text-[13.5px] text-stone-500 font-medium text-center leading-normal mt-0.5">
-          {profile.company || 'شرکت رویا طرح داخلی'}
-        </p>
+        {/* 3. Name and title */}
+        <h1 className="mt-3.5 text-2xl sm:text-[25px] font-black text-stone-800 tracking-tight text-center">{profile.name}</h1>
+        <div className="w-12 h-[2.5px] bg-[#D0192A] rounded-full mx-auto mt-2 mb-2.5" aria-hidden="true" />
+        {profile.title && (
+          <p className="text-[13.5px] text-stone-600 font-medium text-center leading-normal">{profile.title}</p>
+        )}
+        {profile.company && (
+          <p className="text-[13.5px] text-stone-600 font-medium text-center leading-normal mt-0.5">{profile.company}</p>
+        )}
       </div>
 
-      {/* 4. Action Tiles List (Supports RTL and LTR direction per user intent) */}
+      {/* 4. Contact tiles (empty fields are hidden) */}
       <div className="mt-6 space-y-2.5">
-        {/* Row 1: Split 2 columns (تماس + واتساپ) */}
-        <div className="grid grid-cols-2 gap-2.5">
-          {/* تماس مستقیم */}
-          <a
-            id="btn-call-mobile"
-            href={`tel:${telMobile}`}
-            onClick={() => api.trackAnalyticsEvent(profile.id, 'call')}
-            className={`flex items-center gap-3 p-3 bg-white rounded-2xl border border-stone-200/90 hover:border-red-300 hover:bg-stone-50/40 active:scale-[0.98] transition-all item-card-shadow group ${
-              isLtr ? 'flex-row-reverse text-left' : 'text-right'
-            }`}
-            title={`تماس مستقیم با ${profile.mobile}`}
-          >
-            <div className="w-9 h-9 flex items-center justify-center text-[#D0192A] shrink-0">
-              <Phone className="w-5 h-5 stroke-[1.8]" />
-            </div>
-            <div className={`flex flex-col min-w-0 flex-1 ${isLtr ? 'text-left' : 'text-right'}`}>
-              <span className="text-[11.5px] text-stone-500 font-medium leading-none mb-1">تماس</span>
-              <span className="text-[12px] sm:text-[12.5px] text-stone-800 font-bold font-mono tracking-tight truncate" dir="ltr">
-                {profile.mobile}
-              </span>
-            </div>
-          </a>
-
-          {/* واتساپ */}
-          <a
-            id="btn-whatsapp"
-            href={`https://wa.me/${cleanWhatsapp}?text=${encodeURIComponent('سلام وقت بخیر، از طریق کارت ویزیت دیجیتال رویا با شما ارتباط می‌گیرم.')}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => api.trackAnalyticsEvent(profile.id, 'whatsapp')}
-            className={`flex items-center gap-3 p-3 bg-white rounded-2xl border border-stone-200/90 hover:border-red-300 hover:bg-stone-50/40 active:scale-[0.98] transition-all item-card-shadow group ${
-              isLtr ? 'flex-row-reverse text-left' : 'text-right'
-            }`}
-            title={`ارسال پیام در واتساپ به ${profile.whatsapp}`}
-          >
-            <div className="w-9 h-9 flex items-center justify-center text-[#D0192A] shrink-0">
-              <MessageCircle className="w-5 h-5 stroke-[1.8]" />
-            </div>
-            <div className={`flex flex-col min-w-0 flex-1 ${isLtr ? 'text-left' : 'text-right'}`}>
-              <span className="text-[11.5px] text-stone-500 font-medium leading-none mb-1">واتساپ</span>
-              <span className="text-[12px] sm:text-[12.5px] text-stone-800 font-bold font-mono tracking-tight truncate" dir="ltr">
-                {profile.whatsapp}
-              </span>
-            </div>
-          </a>
-        </div>
-
-        {/* Row 2: Split 2 columns (تلفن ثابت + اینستاگرام) */}
-        <div className="grid grid-cols-2 gap-2.5">
-          {/* تلفن ثابت */}
-          <a
-            id="btn-call-landline"
-            href={`tel:${telLandline}`}
-            onClick={() => api.trackAnalyticsEvent(profile.id, 'call')}
-            className={`flex items-center gap-3 p-3 bg-white rounded-2xl border border-stone-200/90 hover:border-red-300 hover:bg-stone-50/40 active:scale-[0.98] transition-all item-card-shadow group ${
-              isLtr ? 'flex-row-reverse text-left' : 'text-right'
-            }`}
-            title={`تماس با تلفن ثابت ${profile.landline}`}
-          >
-            <div className="w-9 h-9 flex items-center justify-center text-[#D0192A] shrink-0">
-              <PhoneCall className="w-5 h-5 stroke-[1.8]" />
-            </div>
-            <div className={`flex flex-col min-w-0 flex-1 ${isLtr ? 'text-left' : 'text-right'}`}>
-              <span className="text-[11.5px] text-stone-500 font-medium leading-none mb-1">تلفن ثابت</span>
-              <span className="text-[12px] sm:text-[12.5px] text-stone-800 font-bold font-mono tracking-tight truncate" dir="ltr">
-                {profile.landline}
-              </span>
-            </div>
-          </a>
-
-          {/* اینستاگرام */}
-          <a
-            id="btn-instagram"
-            href={instagramHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`flex items-center gap-3 p-3 bg-white rounded-2xl border border-stone-200/90 hover:border-red-300 hover:bg-stone-50/40 active:scale-[0.98] transition-all item-card-shadow group ${
-              isLtr ? 'flex-row-reverse text-left' : 'text-right'
-            }`}
-            title={`مشاهده صفحه اینستاگرام @${displayInstagramHandle}`}
-          >
-            <div className="w-9 h-9 flex items-center justify-center text-[#D0192A] shrink-0">
-              <Instagram className="w-5 h-5 stroke-[1.8]" />
-            </div>
-            <div className={`flex flex-col min-w-0 flex-1 ${isLtr ? 'text-left' : 'text-right'}`}>
-              <span className="text-[11.5px] text-stone-500 font-medium leading-none mb-1">اینستاگرام</span>
-              <span className="text-[12px] sm:text-[12.5px] text-stone-800 font-bold tracking-tight truncate" dir="ltr">
-                {displayInstagramHandle}
-              </span>
-            </div>
-          </a>
-        </div>
-
-        {/* Row 3: Full Width (وب سایت) */}
-        <a
-          id="btn-website"
-          href={websiteHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`w-full flex items-center justify-between p-3.5 sm:p-4 bg-white rounded-2xl border border-stone-200/90 hover:border-red-300 hover:bg-stone-50/40 active:scale-[0.99] transition-all item-card-shadow group ${
-            isLtr ? 'flex-row-reverse' : ''
-          }`}
-          title="مشاهده وب‌سایت رسمی رویا طرح داخلی"
-        >
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 flex items-center justify-center text-[#D0192A] shrink-0">
-              <Globe className="w-5 h-5 stroke-[1.8]" />
-            </div>
-            <div className={`flex flex-col overflow-hidden ${isLtr ? 'text-left' : 'text-right'}`}>
-              <span className="text-[11.5px] text-stone-500 font-medium leading-none mb-1">وب سایت</span>
-              <span className="text-[13px] text-stone-800 font-medium font-mono tracking-tight truncate" dir="ltr">
-                {displayWebsite}
-              </span>
-            </div>
+        {hasRow1 && (
+          <div className={`grid gap-2.5 ${telMobile && waNumber ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {telMobile && (
+              <HalfTile
+                id="btn-call-mobile"
+                href={`tel:${telMobile}`}
+                label="تماس"
+                value={toPersianDigits(profile.mobile)}
+                icon={<Phone className="w-5 h-5 stroke-[1.8]" />}
+                ariaLabel={`تماس با موبایل ${profile.mobile}`}
+                onClick={() => track('call')}
+              />
+            )}
+            {waNumber && (
+              <HalfTile
+                id="btn-whatsapp"
+                href={`https://wa.me/${waNumber}?text=${encodeURIComponent('سلام وقت بخیر، از طریق کارت ویزیت دیجیتال با شما ارتباط می‌گیرم.')}`}
+                label="واتساپ"
+                value={toPersianDigits(profile.whatsapp)}
+                icon={<MessageCircle className="w-5 h-5 stroke-[1.8]" />}
+                ariaLabel={`پیام در واتساپ به ${profile.whatsapp}`}
+                external
+                onClick={() => track('whatsapp')}
+              />
+            )}
           </div>
-          {isLtr ? (
-            <ChevronRight className="w-4 h-4 text-stone-400 group-hover:text-[#D0192A] group-hover:translate-x-0.5 transition-all shrink-0" />
-          ) : (
-            <ChevronLeft className="w-4 h-4 text-stone-400 group-hover:text-[#D0192A] group-hover:-translate-x-0.5 transition-all shrink-0" />
-          )}
-        </a>
+        )}
 
-        {/* Row 4: Full Width (کاتالوگ محصولات - دانلود مستقیم فایل PDF) */}
-        <button
-          id="btn-catalog"
-          type="button"
-          onClick={handleDownloadCatalog}
-          className={`w-full flex items-center justify-between p-3.5 sm:p-4 bg-white rounded-2xl border border-stone-200/90 hover:border-red-300 hover:bg-stone-50/40 active:scale-[0.99] transition-all item-card-shadow group cursor-pointer ${
-            isLtr ? 'flex-row-reverse' : ''
-          }`}
-          title="دانلود مستقیم فایل PDF کاتالوگ محصولات رویا طرح داخلی"
-        >
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 flex items-center justify-center text-[#D0192A] shrink-0">
-              <BookOpen className="w-5 h-5 stroke-[1.8]" />
-            </div>
-            <div className={`flex flex-col overflow-hidden ${isLtr ? 'text-left' : 'text-right'}`}>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11.5px] text-stone-500 font-medium leading-none mb-1">کاتالوگ محصولات</span>
-                <span className="text-[9.5px] bg-red-50 text-[#D0192A] px-1.5 py-0.2 rounded font-bold border border-red-100 mb-1">
-                  PDF
-                </span>
-              </div>
-              <span className="text-[13px] text-stone-800 font-medium tracking-tight truncate flex items-center gap-1">
-                {catalogDownloading ? (
-                  <span className="text-emerald-600 font-bold animate-pulse">در حال دانلود کاتالوگ...</span>
-                ) : (
-                  <span>{displayCatalog}</span>
-                )}
-              </span>
-            </div>
+        {hasRow2 && (
+          <div className={`grid gap-2.5 ${telLandline && instagram ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {telLandline && (
+              <HalfTile
+                id="btn-call-landline"
+                href={`tel:${telLandline}`}
+                label="تلفن ثابت"
+                value={toPersianDigits(profile.landline)}
+                icon={<PhoneCall className="w-5 h-5 stroke-[1.8]" />}
+                ariaLabel={`تماس با تلفن ثابت ${profile.landline}`}
+                onClick={() => track('call')}
+              />
+            )}
+            {instagram && (
+              <HalfTile
+                id="btn-instagram"
+                href={instagram.href}
+                label="اینستاگرام"
+                value={instagram.handle}
+                icon={<Instagram className="w-5 h-5 stroke-[1.8]" />}
+                ariaLabel={`صفحه اینستاگرام ${instagram.handle}`}
+                external
+                onClick={() => track('instagram')}
+              />
+            )}
           </div>
-          {isLtr ? (
-            <div className="flex items-center gap-1">
-              <FileDown className="w-3.5 h-3.5 text-stone-400 group-hover:text-[#D0192A] transition-colors" />
-              <ChevronRight className="w-4 h-4 text-stone-400 group-hover:text-[#D0192A] group-hover:translate-x-0.5 transition-all shrink-0" />
-            </div>
-          ) : (
-            <div className="flex items-center gap-1">
-              <FileDown className="w-3.5 h-3.5 text-stone-400 group-hover:text-[#D0192A] transition-colors" />
-              <ChevronLeft className="w-4 h-4 text-stone-400 group-hover:text-[#D0192A] group-hover:-translate-x-0.5 transition-all shrink-0" />
-            </div>
-          )}
-        </button>
+        )}
 
-        {/* Row 5: Full Width (ایمیل) */}
-        <a
-          id="btn-email"
-          href={`mailto:${profile.email}`}
-          className={`w-full flex items-center justify-between p-3.5 sm:p-4 bg-white rounded-2xl border border-stone-200/90 hover:border-red-300 hover:bg-stone-50/40 active:scale-[0.99] transition-all item-card-shadow group ${
-            isLtr ? 'flex-row-reverse' : ''
-          }`}
-          title={`ارسال ایمیل به ${profile.email}`}
-        >
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 flex items-center justify-center text-[#D0192A] shrink-0">
-              <Mail className="w-5 h-5 stroke-[1.8]" />
-            </div>
-            <div className={`flex flex-col overflow-hidden ${isLtr ? 'text-left' : 'text-right'}`}>
-              <span className="text-[11.5px] text-stone-500 font-medium leading-none mb-1">ایمیل</span>
-              <span className="text-[13px] text-stone-800 font-medium font-mono tracking-tight truncate" dir="ltr">
-                {profile.email}
-              </span>
-            </div>
-          </div>
-          {isLtr ? (
-            <ChevronRight className="w-4 h-4 text-stone-400 group-hover:text-[#D0192A] group-hover:translate-x-0.5 transition-all shrink-0" />
-          ) : (
-            <ChevronLeft className="w-4 h-4 text-stone-400 group-hover:text-[#D0192A] group-hover:-translate-x-0.5 transition-all shrink-0" />
-          )}
-        </a>
+        {website && (
+          <WideTile
+            id="btn-website"
+            label="وب سایت"
+            icon={<Globe className="w-5 h-5 stroke-[1.8]" />}
+            isLtr={isLtr}
+            href={website.href}
+            external
+            ariaLabel={`وب‌سایت ${website.label}`}
+            onClick={() => track('website')}
+          >
+            <span className="text-[13.5px] text-stone-800 font-medium truncate" dir="ltr">
+              {website.label}
+            </span>
+          </WideTile>
+        )}
 
-        {/* Row 6: Full Width (آدرس و مسیریابی) */}
-        <button
-          id="btn-address-routing"
-          type="button"
-          onClick={handleOpenRouting}
-          className={`w-full flex items-center justify-between p-3.5 sm:p-4 bg-white rounded-2xl border border-stone-200/90 hover:border-red-300 hover:bg-stone-50/40 active:scale-[0.99] transition-all item-card-shadow group cursor-pointer ${
-            isLtr ? 'flex-row-reverse text-left' : 'text-right'
-          }`}
-          title="مشاهده آدرس و مسیریابی با نشان، بلد، گوگل مپ و ویز"
-        >
-          <div className="flex items-start gap-3 overflow-hidden">
-            <div className="w-9 h-9 flex items-center justify-center text-[#D0192A] shrink-0 mt-0.5">
-              <MapPin className="w-5 h-5 stroke-[1.8]" />
-            </div>
-            <div className={`flex flex-col overflow-hidden ${isLtr ? 'text-left' : 'text-right'}`}>
-              <span className="text-[11.5px] text-stone-500 font-medium leading-none mb-1">آدرس و مسیریابی</span>
-              <span className="text-[12px] sm:text-[12.5px] text-stone-600 font-normal leading-relaxed">
-                {profile.address}
-              </span>
-            </div>
-          </div>
-          {isLtr ? (
-            <ChevronRight className="w-4 h-4 text-stone-400 group-hover:text-[#D0192A] group-hover:translate-x-0.5 transition-all shrink-0 self-center" />
-          ) : (
-            <ChevronLeft className="w-4 h-4 text-stone-400 group-hover:text-[#D0192A] group-hover:-translate-x-0.5 transition-all shrink-0 self-center" />
-          )}
-        </button>
+        {catalogHref && (
+          <WideTile
+            id="btn-catalog"
+            label="کاتالوگ محصولات"
+            icon={<BookOpen className="w-5 h-5 stroke-[1.8]" />}
+            isLtr={isLtr}
+            onClick={handleDownloadCatalog}
+            ariaLabel="دانلود کاتالوگ محصولات (PDF)"
+            trailing={<FileDown className="w-3.5 h-3.5 text-stone-400 group-hover:text-[#D0192A] transition-colors" />}
+          >
+            <span className="text-[13.5px] text-stone-800 font-medium truncate">
+              {catalogDownloading ? (
+                <span className="text-emerald-700 font-bold">در حال دانلود کاتالوگ...</span>
+              ) : (
+                <>
+                  {catalogLabel} <span className="text-[10px] bg-red-50 text-[#D0192A] px-1.5 rounded font-bold border border-red-100">PDF</span>
+                </>
+              )}
+            </span>
+          </WideTile>
+        )}
 
-        {/* 5. Prominent Red CTA Button: ذخیره در مخاطبین */}
+        {profile.email && (
+          <WideTile
+            id="btn-email"
+            label="ایمیل"
+            icon={<Mail className="w-5 h-5 stroke-[1.8]" />}
+            isLtr={isLtr}
+            href={`mailto:${profile.email}`}
+            ariaLabel={`ارسال ایمیل به ${profile.email}`}
+            onClick={() => track('email')}
+          >
+            <span className="text-[13.5px] text-stone-800 font-medium truncate" dir="ltr">
+              {profile.email}
+            </span>
+          </WideTile>
+        )}
+
+        {profile.address && (
+          <WideTile
+            id="btn-address-routing"
+            label="آدرس و مسیریابی"
+            icon={<MapPin className="w-5 h-5 stroke-[1.8]" />}
+            isLtr={isLtr}
+            onClick={handleOpenRouting}
+            ariaLabel={`آدرس و مسیریابی: ${profile.address}`}
+          >
+            <span className="text-[13px] text-stone-600 font-normal leading-relaxed">{toPersianDigits(profile.address)}</span>
+          </WideTile>
+        )}
+
+        {/* 5. Primary actions */}
         <div className="pt-2">
           <button
             id="btn-save-contact"
+            ref={saveButtonRef}
             type="button"
             onClick={handleSaveContact}
-            className={`w-full py-3.5 sm:py-4 px-4 sm:px-5 bg-[#D0192A] hover:bg-[#B51221] active:scale-[0.98] text-white rounded-2xl flex items-center justify-between shadow-lg shadow-red-500/20 transition-all duration-200 cursor-pointer ${
-              isLtr ? 'flex-row-reverse' : ''
-            }`}
+            className="w-full py-3.5 sm:py-4 px-4 sm:px-5 bg-[#D0192A] hover:bg-[#B51221] active:scale-[0.98] text-white rounded-2xl flex items-center justify-between gap-3 shadow-lg shadow-red-500/20 transition-all duration-200 cursor-pointer"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0">
+            <span className="flex items-center gap-3">
+              <span className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0" aria-hidden="true">
                 <Contact className="w-5 h-5 text-white" />
-              </div>
-              <div className={`flex flex-col ${isLtr ? 'text-left' : 'text-right'}`}>
-                <span className="text-base sm:text-[17px] font-bold tracking-tight">
-                  {savedSuccess ? 'اطلاعات در حال دانلود...' : 'ذخیره در مخاطبین'}
-                </span>
-                <span className="text-[11px] sm:text-[12px] text-white/90 font-light mt-0.5">
-                  {savedSuccess ? 'فایل .vcf مخاطب دریافت شد' : 'افزودن اطلاعات به مخاطبین شما'}
-                </span>
-              </div>
-            </div>
-
-            <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0">
-              {savedSuccess ? (
-                <Check className="w-5 h-5 text-white animate-bounce" />
-              ) : (
-                <Download className="w-5 h-5 text-white stroke-[2.2]" />
-              )}
-            </div>
+              </span>
+              <span className="flex flex-col" style={{ textAlign: 'start' }}>
+                <span className="text-base sm:text-[17px] font-bold tracking-tight">ذخیره در مخاطبین</span>
+                <span className="text-[12px] text-white/90 font-light mt-0.5">افزودن اطلاعات به مخاطبین گوشی شما</span>
+              </span>
+            </span>
+            <span className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0" aria-hidden="true">
+              {savedSuccess ? <Check className="w-5 h-5 text-white" /> : <Download className="w-5 h-5 text-white stroke-[2.2]" />}
+            </span>
           </button>
 
-          {/* Success Toast */}
-          {savedSuccess && (
-            <div className="mt-2.5 p-2.5 bg-emerald-50 text-emerald-800 text-xs rounded-xl flex items-center justify-center gap-2 border border-emerald-200 animate-in fade-in">
-              <Sparkles className="w-4 h-4 text-emerald-600" />
-              <span>فایل مخاطب آماده شد. با باز کردن آن، اطلاعات فوراً در دفترچه تلفن گوشی ثبت می‌شود.</span>
-            </div>
-          )}
+          <div aria-live="polite">
+            {savedSuccess && (
+              <p className="mt-2.5 p-3 bg-emerald-50 text-emerald-900 text-xs leading-relaxed rounded-xl border border-emerald-200">
+                {isIOS
+                  ? 'فایل مخاطب دانلود شد. آن را باز کنید و «افزودن به مخاطبین» را بزنید. اگر از داخل اینستاگرام یا تلگرام آمده‌اید، اول صفحه را در Safari باز کنید.'
+                  : 'فایل مخاطب دانلود شد. آن را از اعلان دانلود باز کنید تا در دفترچه تلفن ذخیره شود. اگر از داخل اینستاگرام یا تلگرام آمده‌اید، اول صفحه را در Chrome باز کنید.'}
+              </p>
+            )}
+          </div>
 
-          {/* Secondary Two-Way CTA: تبادل کارت / ارسال شماره مشتری */}
           <button
             id="btn-exchange-contact"
             type="button"
             onClick={() => setIsLeadModalOpen(true)}
-            className={`mt-2.5 w-full py-3 px-4 bg-stone-900 hover:bg-stone-800 active:scale-[0.99] text-white rounded-2xl flex items-center justify-between shadow-sm transition-all duration-200 cursor-pointer ${
-              isLtr ? 'flex-row-reverse' : ''
-            }`}
+            className="mt-2.5 w-full py-3 px-4 bg-stone-900 hover:bg-stone-800 active:scale-[0.99] text-white rounded-2xl flex items-center justify-between gap-3 shadow-sm transition-all duration-200 cursor-pointer"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
+            <span className="flex items-center gap-3">
+              <span className="w-8 h-8 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0" aria-hidden="true">
                 <UserPlus className="w-4 h-4 text-amber-400" />
-              </div>
-              <div className={`flex flex-col ${isLtr ? 'text-left' : 'text-right'}`}>
-                <span className="text-xs sm:text-[13.5px] font-bold">
-                  ارسال شماره شما برای کارشناس
-                </span>
-                <span className="text-[10.5px] text-stone-300 font-normal">
-                  تبادل کارت ویزیت و ثبت درخواست تماس
-                </span>
-              </div>
-            </div>
+              </span>
+              <span className="flex flex-col" style={{ textAlign: 'start' }}>
+                <span className="text-[13.5px] font-bold">ارسال شماره شما برای کارشناس</span>
+                <span className="text-[11.5px] text-stone-300 font-normal">تبادل کارت ویزیت و ثبت درخواست تماس</span>
+              </span>
+            </span>
             {isLtr ? (
-              <ChevronRight className="w-4 h-4 text-stone-400 shrink-0" />
+              <ChevronRight className="w-4 h-4 text-stone-400 shrink-0" aria-hidden="true" />
             ) : (
-              <ChevronLeft className="w-4 h-4 text-stone-400 shrink-0" />
+              <ChevronLeft className="w-4 h-4 text-stone-400 shrink-0" aria-hidden="true" />
             )}
           </button>
         </div>
 
-        {/* 6. Divider "اسکن کنید" */}
-        <div className="pt-5 pb-3 flex items-center justify-center gap-3">
+        {/* 6. QR for passing the card on */}
+        <div className="pt-5 pb-3 flex items-center justify-center gap-3" aria-hidden="true">
           <div className="flex-1 h-[1px] bg-stone-200" />
-          <span className="text-xs text-stone-400 font-normal px-2">اسکن یا اشتراک‌گذاری</span>
+          <span className="text-xs text-stone-500 font-normal px-2">اسکن یا اشتراک‌گذاری</span>
           <div className="flex-1 h-[1px] bg-stone-200" />
         </div>
 
-        {/* 7. QR Code Container with Branded Center Badge */}
         <div className="flex flex-col items-center justify-center pb-1">
-          <div 
+          <button
+            type="button"
             onClick={onOpenShare}
+            aria-label="بزرگنمایی کد QR و اشتراک‌گذاری کارت"
             className="p-3 bg-white rounded-2xl border border-stone-200/90 shadow-xs hover:border-red-300 hover:shadow-md cursor-pointer transition-all duration-200"
-            title="کلیک برای بزرگنمایی یا اشتراک‌گذاری کیوآرکد"
           >
             <QRCodeSVG
               value={cardUrl}
@@ -604,32 +505,75 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
               level="H"
               fgColor="#1C1917"
               bgColor="#FFFFFF"
-              imageSettings={{
-                src: '/favicon.png',
-                height: 28,
-                width: 28,
-                excavate: true,
-              }}
+              imageSettings={{ src: '/favicon.png', height: 28, width: 28, excavate: true }}
             />
-          </div>
-
+          </button>
           <button
             type="button"
             onClick={onOpenShare}
-            className="mt-2.5 py-1.5 px-3.5 rounded-full bg-stone-100 hover:bg-stone-200/80 text-stone-600 hover:text-stone-900 text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="mt-2.5 py-2 px-4 rounded-full bg-stone-100 hover:bg-stone-200/80 text-stone-700 hover:text-stone-900 text-[12px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <Share2 className="w-3.5 h-3.5 text-[#D0192A]" />
+            <Share2 className="w-3.5 h-3.5 text-[#D0192A]" aria-hidden="true" />
             <span>اشتراک‌گذاری لینک کارت و بارکد</span>
           </button>
         </div>
       </div>
 
-      {/* Customer Lead Capture Modal */}
-      <LeadCaptureModal
-        isOpen={isLeadModalOpen}
-        onClose={() => setIsLeadModalOpen(false)}
-        profile={profile}
-      />
     </div>
+    {isStandalone && (
+      <div
+        className={`fixed inset-x-0 bottom-0 z-40 transition-transform duration-300 ${showStickyBar ? 'translate-y-0' : 'translate-y-full'}`}
+        aria-hidden={!showStickyBar}
+      >
+        <div
+          className="max-w-[430px] mx-auto px-3 pt-2 bg-white/95 backdrop-blur border-t border-stone-200 shadow-[0_-6px_20px_rgba(0,0,0,0.06)] flex gap-2"
+          style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+          dir={isLtr ? 'ltr' : 'rtl'}
+        >
+          <button
+            type="button"
+            onClick={handleSaveContact}
+            tabIndex={showStickyBar ? 0 : -1}
+            className="flex-1 min-h-12 rounded-xl bg-[#D0192A] hover:bg-[#B51221] text-white text-[13.5px] font-bold flex items-center justify-center gap-2 cursor-pointer"
+          >
+            {savedSuccess ? <Check className="w-4 h-4" aria-hidden="true" /> : <Contact className="w-4 h-4" aria-hidden="true" />}
+            ذخیره مخاطب
+          </button>
+          {telMobile && (
+            <a
+              href={`tel:${telMobile}`}
+              onClick={() => track('call')}
+              tabIndex={showStickyBar ? 0 : -1}
+              aria-label={`تماس با ${profile.name}`}
+              className="min-h-12 min-w-12 px-3 rounded-xl border border-stone-200 text-[#D0192A] flex items-center justify-center gap-1.5 text-[13px] font-bold"
+            >
+              <Phone className="w-5 h-5" aria-hidden="true" />
+              <span>تماس</span>
+            </a>
+          )}
+          {waNumber && (
+            <a
+              href={`https://wa.me/${waNumber}?text=${encodeURIComponent('سلام وقت بخیر، از طریق کارت ویزیت دیجیتال با شما ارتباط می‌گیرم.')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => track('whatsapp')}
+              tabIndex={showStickyBar ? 0 : -1}
+              aria-label={`پیام در واتساپ به ${profile.name}`}
+              className="min-h-12 min-w-12 px-3 rounded-xl border border-stone-200 text-emerald-700 flex items-center justify-center gap-1.5 text-[13px] font-bold"
+            >
+              <MessageCircle className="w-5 h-5" aria-hidden="true" />
+              <span>واتساپ</span>
+            </a>
+          )}
+        </div>
+      </div>
+    )}
+    <LeadCaptureModal
+      isOpen={isLeadModalOpen}
+      onClose={() => setIsLeadModalOpen(false)}
+      profile={profile}
+      source={visitRef.current?.source}
+    />
+    </>
   );
 };

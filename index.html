@@ -1,50 +1,14 @@
 <!doctype html>
 <html lang="fa" dir="rtl">
   <head>
-    <script>
-      (function() {
-        if (typeof window === 'undefined') return;
-        var OrigWS = window.WebSocket;
-        if (OrigWS) {
-          window.WebSocket = function(url, protocols) {
-            if (protocols === 'vite-hmr' || (typeof url === 'string' && (url.indexOf('vite-hmr') !== -1 || url.indexOf('token=') !== -1))) {
-              var dummy = new EventTarget();
-              dummy.binaryType = 'blob';
-              dummy.readyState = 1;
-              dummy.send = function() {};
-              dummy.close = function() {};
-              setTimeout(function() {
-                dummy.dispatchEvent(new Event('open'));
-              }, 0);
-              return dummy;
-            }
-            return new OrigWS(url, protocols);
-          };
-          window.WebSocket.prototype = OrigWS.prototype;
-          window.WebSocket.CONNECTING = OrigWS.CONNECTING;
-          window.WebSocket.OPEN = OrigWS.OPEN;
-          window.WebSocket.CLOSING = OrigWS.CLOSING;
-          window.WebSocket.CLOSED = OrigWS.CLOSED;
-        }
-        window.addEventListener('unhandledrejection', function(e) {
-          if (e.reason && (
-            String(e.reason.message || e.reason).indexOf('WebSocket closed without opened') !== -1 ||
-            String(e.reason.stack || '').indexOf('@vite/client') !== -1
-          )) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-          }
-        });
-      })();
-    </script>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>کارت ویزیت هوشمند رویا طرح داخلی</title>
     <meta name="description" content="کارت ویزیت دیجیتال و هوشمند کارمندان شرکت رویا طرح داخلی با پشتیبانی از NFC، QR Code و ذخیره مستقیم در مخاطبین" />
     <meta property="og:title" content="کارت ویزیت هوشمند رویا طرح داخلی" />
     <meta property="og:description" content="کارت ویزیت دیجیتال و هوشمند کارمندان شرکت رویا طرح داخلی با پشتیبانی از NFC، QR Code و ذخیره مستقیم در مخاطبین" />
     <meta property="og:type" content="website" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" content="#f5f5f4" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -52,11 +16,8 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-slate-950 text-slate-100 font-sans antialiased selection:bg-amber-500 selection:text-slate-950">
+  <body class="bg-stone-100 text-stone-900 font-sans antialiased selection:bg-red-600 selection:text-white">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

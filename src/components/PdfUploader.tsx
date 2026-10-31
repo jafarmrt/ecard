@@ -5,10 +5,7 @@ import {
   CheckCircle2, 
   FileDown, 
   AlertCircle, 
-  Loader2, 
-  Sparkles,
-  Trash2,
-  ExternalLink
+  Loader2,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { downloadCatalogPdf } from '../utils/catalog';
@@ -51,8 +48,8 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({
       return;
     }
 
-    if (file.size > 50 * 1024 * 1024) {
-      setErrorMsg('حجم فایل انتخابی بیش از ۵۰ مگابایت است. لطفاً فایل کم‌حجم‌تری انتخاب فرمایید.');
+    if (file.size > 30 * 1024 * 1024) {
+      setErrorMsg('حجم فایل انتخابی بیش از ۳۰ مگابایت است. لطفاً فایل کم‌حجم‌تری انتخاب فرمایید.');
       return;
     }
 
@@ -60,34 +57,19 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({
     setUploadProgress(`در حال پردازش ${file.name} (${formatFileSize(file.size)})...`);
 
     try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64Data = e.target?.result as string;
-        if (!base64Data) {
-          setIsUploading(false);
-          setErrorMsg('خطا در خواندن فایل.');
-          return;
-        }
-
-        setUploadProgress('در حال ارسال فایل به سرور...');
-        const result = await api.uploadPdf(base64Data, file.name, replaceDefault);
-
-        setIsUploading(false);
-        if (result.success && result.url) {
-          onPdfUploaded(result.url, file.name);
-          setUploadedInfo({
-            name: file.name,
-            size: formatFileSize(file.size),
-          });
-          setUploadProgress(null);
-        } else {
-          setErrorMsg(result.error || 'خطا در بارگذاری فایل');
-        }
-      };
-      reader.readAsDataURL(file);
+      setUploadProgress('در حال ارسال فایل به سرور...');
+      const result = await api.uploadPdf(file, file.name, replaceDefault);
+      if (result.success && result.url) {
+        onPdfUploaded(result.url, file.name);
+        setUploadedInfo({ name: file.name, size: formatFileSize(file.size) });
+        setUploadProgress(null);
+      } else {
+        setErrorMsg(result.error || 'خطا در بارگذاری فایل');
+      }
     } catch (err: any) {
-      setIsUploading(false);
       setErrorMsg('خطا در بارگذاری فایل: ' + (err?.message || 'نامشخص'));
+    } finally {
+      setIsUploading(false);
     }
   };
 

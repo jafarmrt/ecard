@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
-import { Download, Smartphone, X, Check, Share, PlusSquare } from 'lucide-react';
+import { Download, Smartphone, X, Share, PlusSquare } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 
 interface PWAInstallButtonProps {
   className?: string;
-  variant?: 'header' | 'card' | 'banner';
 }
 
 export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ 
   className = '',
-  variant = 'header' 
 }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
