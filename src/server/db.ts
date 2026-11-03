@@ -29,6 +29,7 @@ import type {
   EmployeeProfile,
   MapLocation,
   Organization,
+  PhysicalCardStatus,
   ProfileStatus,
 } from '../types.ts';
 import {
@@ -182,6 +183,9 @@ export interface BulkBrandUpdatePayload {
 const now = () => new Date().toISOString();
 
 const LEAD_STATUSES: LeadStatus[] = ['new', 'contacted', 'closed'];
+const PHYSICAL_CARD_STATUSES: PhysicalCardStatus[] = ['none', 'ordered', 'delivered', 'lost'];
+/** A new request nobody has answered for this long is shown as overdue. */
+export const LEAD_OVERDUE_MS = 48 * 60 * 60 * 1000;
 
 /** Iran has used a fixed UTC+03:30 (no daylight saving) since 2022; analytics days follow Tehran time. */
 const TEHRAN_OFFSET_MS = 210 * 60 * 1000;
@@ -541,6 +545,9 @@ function resolveRow(row: ProfileRow, ctx: Context): EmployeeProfile {
 function toStorage(input: EmployeeProfile, org: Organization, branch: Branch | undefined): Record<string, unknown> {
   const data: Record<string, unknown> = { ...input };
   for (const f of META_FIELDS) delete data[f];
+  if (!PHYSICAL_CARD_STATUSES.includes(data.physicalCard as PhysicalCardStatus) || data.physicalCard === 'none') delete data.physicalCard;
+  if (typeof data.nfcTagSerial === 'string') data.nfcTagSerial = data.nfcTagSerial.trim().slice(0, 64) || undefined;
+  else delete data.nfcTagSerial;
   // Instagram is shown from its link, so a different label with the company link is not an override.
   if (!isBlank(data.instagramUrl) && sameValue('instagramUrl', data.instagramUrl, org.instagramUrl)) {
     delete data.instagram;
@@ -698,6 +705,8 @@ export function toPublicProfile(profile: EmployeeProfile): EmployeeProfile {
     archivedAt: _ar,
     createdAt: _c,
     updatedAt: _u,
+    nfcTagSerial: _n,
+    physicalCard: _pc,
     ...rest
   } = profile;
   return rest as EmployeeProfile;
@@ -1081,6 +1090,36 @@ function toEditRequest(row: any, profile?: EmployeeProfile): EditRequest {
   };
 }
 
+/** Views, visitors, interactions, saved contacts and requests between two UTC instants. */
+function rangeTotals(fromUtc: string, toUtc: string, profileId?: string) {
+  const extra = profileId ? ' AND profile_id = ?' : '';
+  const args = profileId ? [fromUtc, toUtc, profileId] : [fromUtc, toUtc];
+  const ev = conn()
+    .prepare(
+      `SELECT SUM(CASE WHEN type = 'view' THEN 1 ELSE 0 END) AS views,
+              SUM(CASE WHEN type IN (${INTERACTION_TYPES.map(() => '?').join(',')}) THEN 1 ELSE 0 END) AS interactions,
+              SUM(CASE WHEN type = 'vcardDownload' THEN 1 ELSE 0 END) AS saves
+       FROM events WHERE created_at >= ? AND created_at < ?${extra}`
+    )
+    .get(...INTERACTION_TYPES, ...args) as { views: number | null; interactions: number | null; saves: number | null };
+  const visitors = conn()
+    .prepare(
+      `SELECT COUNT(*) AS n FROM (SELECT DISTINCT ${TEHRAN_DAY_SQL}, visitor FROM events
+       WHERE type = 'view' AND visitor IS NOT NULL AND created_at >= ? AND created_at < ?${extra})`
+    )
+    .get(...args) as { n: number };
+  const leads = conn().prepare(`SELECT COUNT(*) AS n FROM leads WHERE created_at >= ? AND created_at < ?${extra}`).get(...args) as {
+    n: number;
+  };
+  return {
+    views: ev.views || 0,
+    visitors: visitors.n,
+    interactions: ev.interactions || 0,
+    saves: ev.saves || 0,
+    leads: leads.n,
+  };
+}
+
 export type PublicCardResult =
   | { kind: 'ok'; profile: EmployeeProfile; canonicalSlug?: string; replacedFrom?: { id: string; name: string } }
   | { kind: 'unavailable'; state: 'inactive' | 'archived'; name: string; organization: Organization; branch?: Branch }
@@ -1421,10 +1460,39 @@ export const db = {
       row.leads = r.leads;
       byProfile.set(r.profileId, row);
     }
+    // The same number of days just before this range, to show "compared with the previous period".
+    const spanDays = Math.round((end - start) / 86400000) + 1;
+    const prevTo = tehranDay(new Date(start - 86400000 + 12 * 3600000));
+    const prevFrom = tehranDay(new Date(start - spanDays * 86400000 + 12 * 3600000));
+    const byCampaign = conn()
+      .prepare(
+        `SELECT campaign, SUM(CASE WHEN type = 'view' THEN 1 ELSE 0 END) AS views,
+                SUM(CASE WHEN type IN (${INTERACTION_TYPES.map(() => '?').join(',')}) THEN 1 ELSE 0 END) AS interactions
+         FROM events WHERE campaign IS NOT NULL AND created_at >= ? AND created_at < ?${filter} GROUP BY campaign`
+      )
+      .all(...INTERACTION_TYPES, ...params) as { campaign: string; views: number; interactions: number }[];
+    const campaignLeads = conn()
+      .prepare(
+        `SELECT campaign, COUNT(*) AS leads FROM leads WHERE campaign IS NOT NULL AND created_at >= ? AND created_at < ?${
+          opts.profileId ? ' AND profile_id = ?' : ''
+        } GROUP BY campaign`
+      )
+      .all(...params) as { campaign: string; leads: number }[];
+    const campaigns = new Map(byCampaign.map((c) => [c.campaign, { ...c, leads: 0 }]));
+    for (const c of campaignLeads) {
+      const row = campaigns.get(c.campaign) || { campaign: c.campaign, views: 0, interactions: 0, leads: 0 };
+      row.leads = c.leads;
+      campaigns.set(c.campaign, row);
+    }
     return {
       days: [...days.values()].sort((a, b) => a.day.localeCompare(b.day)),
       bySource,
       byProfile: [...byProfile.values()],
+      totals: rangeTotals(tehranDayStartUtc(opts.from), tehranDayStartUtc(opts.to, 1), opts.profileId),
+      previous: Number.isFinite(spanDays) && spanDays > 0
+        ? { from: prevFrom, to: prevTo, ...rangeTotals(tehranDayStartUtc(prevFrom), tehranDayStartUtc(prevTo, 1), opts.profileId) }
+        : null,
+      byCampaign: [...campaigns.values()].sort((a, b) => b.views - a.views),
     };
   },
 
@@ -1442,6 +1510,7 @@ export const db = {
       note: r.note || undefined,
       consentAt: r.consent_at || undefined,
       source: r.source || undefined,
+      campaign: r.campaign || undefined,
       createdAt: r.created_at,
       status: (r.status || 'new') as LeadStatus,
       followupNote: r.followup_note || undefined,
@@ -1472,7 +1541,7 @@ export const db = {
   },
 
   /** Expects input already validated by validateLeadInput(). */
-  addLead(payload: LeadInput & { source?: string }): { lead: CustomerLead; merged?: boolean } {
+  addLead(payload: LeadInput & { source?: string; campaign?: string }): { lead: CustomerLead; merged?: boolean } {
     // Only attribute the lead when the card really exists; never guess.
     const found = payload.profileId ? findRow(payload.profileId) : undefined;
     const target = found ? followRedirect(found.row) || found.row : undefined;
@@ -1505,12 +1574,13 @@ export const db = {
       note: payload.note,
       consentAt: payload.consent ? now() : undefined,
       source: payload.source ? normalizeSource(payload.source) : undefined,
+      campaign: cleanCampaign(payload.campaign) || undefined,
       createdAt: now(),
     };
     conn()
       .prepare(
-        `INSERT INTO leads (id, profile_id, profile_name, customer_name, customer_mobile, customer_company, topic, note, consent_at, source, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO leads (id, profile_id, profile_name, customer_name, customer_mobile, customer_company, topic, note, consent_at, source, campaign, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         lead.id,
@@ -1523,6 +1593,7 @@ export const db = {
         lead.note ?? null,
         lead.consentAt ?? null,
         lead.source ?? null,
+        lead.campaign ?? null,
         lead.createdAt
       );
     return { lead };
@@ -1530,6 +1601,29 @@ export const db = {
 
   deleteLead(id: string): boolean {
     return Number(conn().prepare('DELETE FROM leads WHERE id = ?').run(id).changes) > 0;
+  },
+
+  /**
+   * Privacy: delete every request from one mobile number (the customer asked),
+   * or closed requests older than N days. Returns how many were deleted.
+   */
+  purgeLeads(opts: { mobile?: string; closedOlderThanDays?: number }): number {
+    if (opts.mobile) {
+      const mobile = normalizeIranMobile(opts.mobile);
+      if (!mobile) throw new ValidationError('شماره موبایل معتبر نیست. نمونه صحیح: 09121234567');
+      return Number(conn().prepare('DELETE FROM leads WHERE customer_mobile = ?').run(mobile).changes);
+    }
+    const days = Number(opts.closedOlderThanDays);
+    if (!Number.isFinite(days) || days < 30) throw new ValidationError('حداقل بازه ۳۰ روز است.');
+    const before = new Date(Date.now() - days * 86400000).toISOString();
+    return Number(
+      conn().prepare("DELETE FROM leads WHERE status = 'closed' AND COALESCE(updated_at, created_at) < ?").run(before).changes
+    );
+  },
+
+  countOverdueLeads(): number {
+    const before = new Date(Date.now() - LEAD_OVERDUE_MS).toISOString();
+    return (conn().prepare("SELECT COUNT(*) AS n FROM leads WHERE status = 'new' AND created_at < ?").get(before) as { n: number }).n;
   },
 
   // ----- admin password & sessions -----

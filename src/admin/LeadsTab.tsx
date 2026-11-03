@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Search, Phone, Contact, Trash2, RefreshCw, MessageCircle } from 'lucide-react';
+import { Download, Search, Phone, Contact, Trash2, RefreshCw, MessageCircle, AlarmClock, ShieldCheck } from 'lucide-react';
 import { CustomerLead, EmployeeProfile, LeadStatus } from '../types';
 import { api } from '../services/api';
 import { LEAD_TOPICS } from '../utils/leadTopics';
-import { telHref, toPersianDigits, whatsappNumber } from '../utils/phone';
+import { normalizeIranMobile, telHref, toPersianDigits, whatsappNumber } from '../utils/phone';
+import { jalaliMonthKey, jalaliMonthLabel, tehranDayOf } from '../utils/jalali';
 import { Button, Section, downloadBlob, formatDate, formatNumber, inputClass, smallSelect, useToast } from './ui';
 
 const SOURCE_LABEL: Record<string, string> = { nfc: 'کارت NFC', qr: 'کد QR', link: 'لینک' };
@@ -15,6 +16,12 @@ const STATUS_STYLE: Record<LeadStatus, string> = {
   closed: 'bg-emerald-50 text-emerald-900 border-emerald-200',
 };
 const statusOf = (l: CustomerLead): LeadStatus => l.status || 'new';
+
+/** A new request nobody has called back within 48 hours. */
+const OVERDUE_MS = 48 * 60 * 60 * 1000;
+export const isOverdue = (l: CustomerLead, now = Date.now()) => statusOf(l) === 'new' && now - Date.parse(l.createdAt) > OVERDUE_MS;
+
+type StatusFilter = LeadStatus | 'overdue' | '';
 
 /** Follow-up note, saved when the field loses focus or with the button. */
 const FollowupNote: React.FC<{ lead: CustomerLead; onSave: (note: string) => Promise<boolean> }> = ({ lead, onSave }) => {
@@ -68,16 +75,25 @@ export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [topic, setTopic] = useState('');
-  const [status, setStatus] = useState<LeadStatus | ''>('');
+  const [status, setStatus] = useState<StatusFilter>('');
   const [owner, setOwner] = useState('');
-  const [period, setPeriod] = useState(0);
+  // '' all, 'd7' last 7 days, 'm1405-08' a Jalali month
+  const [period, setPeriod] = useState('');
 
   const counts = {
     all: leads.length,
     new: leads.filter((l) => statusOf(l) === 'new').length,
     contacted: leads.filter((l) => statusOf(l) === 'contacted').length,
     closed: leads.filter((l) => statusOf(l) === 'closed').length,
+    overdue: leads.filter((l) => isOverdue(l)).length,
   };
+
+  // Jalali months that have requests, newest first, for the period filter and export.
+  const months = [...new Map<string, string>(leads.map((l) => [jalaliMonthKey(l.createdAt), jalaliMonthLabel(tehranDayOf(l.createdAt))])).entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .slice(0, 12);
+  const periodName =
+    period.startsWith('d') ? `${toPersianDigits(period.slice(1))} روز اخیر` : period.startsWith('m') ? months.find(([k]) => `m${k}` === period)?.[1] || '' : '';
 
   useEffect(() => {
     if (!loading) onNewCountChange?.(counts.new);
@@ -112,12 +128,13 @@ export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const since = period ? Date.now() - period * 86400000 : 0;
+  const since = period.startsWith('d') ? Date.now() - Number(period.slice(1)) * 86400000 : 0;
   const visible = leads.filter((l) => {
     if (topic && l.topic !== topic) return false;
-    if (status && statusOf(l) !== status) return false;
+    if (status === 'overdue' ? !isOverdue(l) : status && statusOf(l) !== status) return false;
     if (owner && l.profileId !== owner) return false;
     if (since && Date.parse(l.createdAt) < since) return false;
+    if (period.startsWith('m') && `m${jalaliMonthKey(l.createdAt)}` !== period) return false;
     const q = query.trim().toLowerCase();
     if (!q) return true;
     return [l.customerName, l.customerMobile, l.customerCompany, l.note, l.profileName, l.topic, l.followupNote]
@@ -127,7 +144,7 @@ export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?
 
   const exportCsv = () => {
     if (visible.length === 0) return toast('درخواستی برای خروجی وجود ندارد.', 'error');
-    const header = ['نام مشتری', 'موبایل', 'شرکت', 'موضوع', 'یادداشت', 'کارشناس', 'از طریق', 'تاریخ ثبت', 'رضایت تماس', 'وضعیت', 'نتیجه پیگیری'];
+    const header = ['نام مشتری', 'موبایل', 'شرکت', 'موضوع', 'یادداشت', 'کارشناس', 'از طریق', 'کمپین', 'تاریخ ثبت', 'رضایت تماس', 'وضعیت', 'نتیجه پیگیری'];
     const rows = visible.map((l) => [
       l.customerName,
       l.customerMobile,
@@ -136,13 +153,16 @@ export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?
       l.note || '',
       l.profileName,
       SOURCE_LABEL[l.source || ''] || l.source || '',
+      l.campaign || '',
       formatDate(l.createdAt),
       l.consentAt ? formatDate(l.consentAt) : '',
       STATUS_LABEL[statusOf(l)],
       l.followupNote || '',
     ]);
     const csv = '\uFEFF' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
-    downloadBlob(csv, 'text/csv;charset=utf-8', `roya-leads-${new Date().toISOString().slice(0, 10)}.csv`);
+    const suffix = period.startsWith('m') ? period.slice(1) : period ? `last-${period.slice(1)}-days` : new Date().toISOString().slice(0, 10);
+    downloadBlob(csv, 'text/csv;charset=utf-8', `roya-leads-${suffix}.csv`);
+    toast(`${formatNumber(visible.length)} درخواست${periodName ? ` (${periodName})` : ''} در فایل اکسل ذخیره شد.`);
   };
 
   const downloadVcf = (l: CustomerLead) => {
@@ -159,6 +179,29 @@ export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?
       'END:VCARD',
     ].filter(Boolean);
     downloadBlob(lines.join('\r\n'), 'text/vcard;charset=utf-8', `lead-${l.customerName.replace(/\s+/g, '_')}.vcf`);
+  };
+
+  const forgetCustomer = async () => {
+    const input = window.prompt('شماره موبایل مشتری که خواسته اطلاعاتش حذف شود:');
+    if (!input) return;
+    const mobile = normalizeIranMobile(input);
+    if (!mobile) return toast('شماره موبایل معتبر نیست. نمونه صحیح: 09121234567', 'error');
+    const found = leads.filter((l) => l.customerMobile === mobile).length;
+    if (!window.confirm(`${formatNumber(found)} درخواست از شماره ${toPersianDigits(mobile)} برای همیشه حذف شود؟`)) return;
+    const res = await api.purgeLeads({ mobile });
+    if (res.success) {
+      toast(`${formatNumber(res.removed)} درخواست حذف شد.`);
+      await load();
+    } else toast(res.error || 'حذف انجام نشد.', 'error');
+  };
+
+  const purgeOldClosed = async () => {
+    if (!window.confirm('درخواست‌های «بسته شد» که بیش از یک سال از آخرین تغییرشان گذشته برای همیشه حذف شوند؟')) return;
+    const res = await api.purgeLeads({ closedOlderThanDays: 365 });
+    if (res.success) {
+      toast(`${formatNumber(res.removed)} درخواست قدیمی حذف شد.`);
+      await load();
+    } else toast(res.error || 'حذف انجام نشد.', 'error');
   };
 
   const remove = async (l: CustomerLead) => {
@@ -187,13 +230,24 @@ export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?
         </>
       }
     >
+      {counts.overdue > 0 && status !== 'overdue' && (
+        <button
+          type="button"
+          onClick={() => setStatus('overdue')}
+          className="w-full mb-3 flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-3 py-2.5 text-start text-[13px] font-bold text-[#9E111E] cursor-pointer hover:bg-red-100"
+        >
+          <AlarmClock className="w-4 h-4 shrink-0" aria-hidden="true" />
+          {formatNumber(counts.overdue)} درخواست بیش از ۴۸ ساعت است که بی‌پاسخ مانده. نمایش بده
+        </button>
+      )}
       <div className="flex flex-wrap gap-1.5 mb-3" role="tablist" aria-label="وضعیت پیگیری">
         {([
           ['', 'همه', counts.all],
           ['new', 'جدید', counts.new],
+          ['overdue', 'بی‌پاسخ بیش از ۴۸ ساعت', counts.overdue],
           ['contacted', 'تماس گرفته شد', counts.contacted],
           ['closed', 'بسته شد', counts.closed],
-        ] as [LeadStatus | '', string, number][]).map(([id, label, n]) => (
+        ] as [StatusFilter, string, number][]).map(([id, label, n]) => (
           <button
             key={id || 'all'}
             type="button"
@@ -236,11 +290,16 @@ export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?
             </option>
           ))}
         </select>
-        <select aria-label="بازه زمانی" className={`${smallSelect} min-h-11`} value={period} onChange={(e) => setPeriod(Number(e.target.value))}>
-          <option value={0}>همه زمان‌ها</option>
-          <option value={7}>۷ روز اخیر</option>
-          <option value={30}>۳۰ روز اخیر</option>
-          <option value={90}>۹۰ روز اخیر</option>
+        <select aria-label="بازه زمانی" className={`${smallSelect} min-h-11`} value={period} onChange={(e) => setPeriod(e.target.value)}>
+          <option value="">همه زمان‌ها</option>
+          <option value="d7">۷ روز اخیر</option>
+          <option value="d30">۳۰ روز اخیر</option>
+          <option value="d90">۹۰ روز اخیر</option>
+          {months.map(([key, label]) => (
+            <option key={key} value={`m${key}`}>
+              {label}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -263,6 +322,12 @@ export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?
                     <span className={`inline-block align-middle me-1.5 px-2 py-0.5 rounded-md border text-[11.5px] font-bold ${STATUS_STYLE[statusOf(l)]}`}>
                       {STATUS_LABEL[statusOf(l)]}
                     </span>
+                    {isOverdue(l) && (
+                      <span className="inline-flex items-center gap-1 align-middle me-1.5 px-2 py-0.5 rounded-md bg-[#D0192A] text-white text-[11.5px] font-bold">
+                        <AlarmClock className="w-3 h-3" aria-hidden="true" />
+                        بیش از ۴۸ ساعت بی‌پاسخ
+                      </span>
+                    )}
                     {l.customerName}
                     {l.customerCompany && <span className="font-medium text-stone-600"> · {l.customerCompany}</span>}
                   </p>
@@ -272,7 +337,14 @@ export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?
                   <p className="text-[12px] text-stone-600">
                     {l.topic && <span className="inline-block px-2 py-0.5 me-1.5 rounded-md bg-red-50 text-[#9E111E] font-bold">{l.topic}</span>}
                     برای {l.profileName}
-                    {l.source && ` · از ${SOURCE_LABEL[l.source] || l.source}`} · {formatDate(l.createdAt)}
+                    {l.source && ` · از ${SOURCE_LABEL[l.source] || l.source}`}
+                    {l.campaign && (
+                      <>
+                        {' · کمپین '}
+                        <span dir="ltr">{l.campaign}</span>
+                      </>
+                    )}{' '}
+                    · {formatDate(l.createdAt)}
                   </p>
                   {l.note && <p className="text-[12.5px] text-stone-700 bg-stone-50 rounded-lg px-2.5 py-1.5 mt-1 whitespace-pre-line">{l.note}</p>}
                   <FollowupNote key={l.id} lead={l} onSave={(followupNote) => update(l, { followupNote })} />
@@ -321,6 +393,24 @@ export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?
           })}
         </ul>
       )}
+
+      <details className="mt-5 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2">
+        <summary className="flex items-center gap-2 min-h-9 text-[13px] font-bold text-stone-800 cursor-pointer">
+          <ShieldCheck className="w-4 h-4" aria-hidden="true" />
+          حریم خصوصی مشتری‌ها
+        </summary>
+        <div className="space-y-2 pb-2 text-[12.5px] text-stone-600 leading-relaxed">
+          <p>اگر مشتری خواست شماره‌اش پاک شود، همه درخواست‌های آن شماره را یک‌جا حذف کنید. درخواست‌های بسته‌شده قدیمی را هم بهتر است بعد از یک سال پاک کنید.</p>
+          <div className="flex flex-wrap gap-1.5">
+            <Button size="sm" onClick={() => void forgetCustomer()}>
+              حذف به درخواست مشتری
+            </Button>
+            <Button size="sm" onClick={() => void purgeOldClosed()}>
+              پاک کردن درخواست‌های بسته‌شده قدیمی‌تر از یک سال
+            </Button>
+          </div>
+        </div>
+      </details>
     </Section>
   );
 };

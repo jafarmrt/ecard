@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Camera, Trash2, ChevronDown, Loader2 } from 'lucide-react';
-import { Branch, EmployeeProfile, Organization } from '../types';
+import { Branch, EmployeeProfile, Organization, PhysicalCardStatus } from '../types';
 import { api } from '../services/api';
 import { normalizeIranMobile } from '../utils/phone';
 import { optimizeImage } from '../utils/imageOptimizer';
@@ -33,8 +33,17 @@ interface FormState {
   status: 'active' | 'inactive';
   branchId: string;
   avatarUrl: string;
+  nfcTagSerial: string;
+  physicalCard: PhysicalCardStatus;
   overrides: Record<OverrideField, string>;
 }
+
+export const PHYSICAL_CARD_LABEL: Record<PhysicalCardStatus, string> = {
+  none: 'هنوز سفارش داده نشده',
+  ordered: 'سفارش چاپ داده شد',
+  delivered: 'تحویل همکار شد',
+  lost: 'گم شده / باید دوباره چاپ شود',
+};
 
 const slugify = (s: string) =>
   s
@@ -67,6 +76,8 @@ function initialState(profile: EmployeeProfile | null, branches: Branch[]): Form
     status: profile?.status === 'inactive' ? 'inactive' : 'active',
     branchId: profile?.branchId || defaultBranch?.id || '',
     avatarUrl: profile?.avatarUrl || '',
+    nfcTagSerial: profile?.nfcTagSerial || '',
+    physicalCard: profile?.physicalCard || 'none',
     overrides,
   };
 }
@@ -178,6 +189,8 @@ export const ProfileFormModal: React.FC<{
       status: form.status,
       branchId: form.branchId || undefined,
       avatarUrl: form.avatarUrl || undefined,
+      nfcTagSerial: form.nfcTagSerial.trim(),
+      physicalCard: form.physicalCard,
       landline: form.overrides.landline.trim(),
       address: form.overrides.address.trim(),
       postalCode: form.overrides.postalCode.trim(),
@@ -361,6 +374,34 @@ export const ProfileFormModal: React.FC<{
               }}
               placeholder={slugify(form.nameEn) || 'ali-rezaei'}
               maxLength={60}
+            />
+          </Field>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="کارت ویزیت چاپی" htmlFor="pf-physical" hint="فقط برای پیگیری شما؛ به مشتری نشان داده نمی‌شود.">
+            <select
+              id="pf-physical"
+              className={inputClass}
+              value={form.physicalCard}
+              onChange={(e) => set('physicalCard', e.target.value as PhysicalCardStatus)}
+            >
+              {(Object.keys(PHYSICAL_CARD_LABEL) as PhysicalCardStatus[]).map((k) => (
+                <option key={k} value={k}>
+                  {PHYSICAL_CARD_LABEL[k]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="شماره سریال تگ NFC" htmlFor="pf-nfc" hint="شماره‌ای که چاپخانه روی کارت زده یا اپ NFC Tools نشان می‌دهد.">
+            <input
+              id="pf-nfc"
+              dir="ltr"
+              className={inputClass}
+              value={form.nfcTagSerial}
+              onChange={(e) => set('nfcTagSerial', e.target.value)}
+              maxLength={64}
+              placeholder="04:A2:3B:..."
             />
           </Field>
         </div>

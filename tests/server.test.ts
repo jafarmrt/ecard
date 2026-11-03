@@ -599,3 +599,62 @@ describe('employee self edit', () => {
     expect(card.instagramUrl).toBe(org.instagramUrl);
   });
 });
+
+describe('phase 5: follow-up, privacy and reports', () => {
+  it('keeps the campaign of a request and reports campaigns and the previous period', async () => {
+    await request(app).post('/api/analytics/sara/event').set('User-Agent', 'Mozilla/5.0 (Linux; Android 14)').send({ event: 'view', campaign: 'Expo-1405' });
+    const lead = await request(app)
+      .post('/api/leads')
+      .set('X-Forwarded-For', '10.5.0.50')
+      .send({ profileId: 'sara', customerName: 'مشتری نمایشگاه', customerMobile: '09127770001', campaign: 'Expo-1405', ...CONSENT });
+    expect(lead.status).toBe(201);
+    const leads = (await request(app).get('/api/leads').set(auth())).body.leads;
+    expect(leads.find((l: any) => l.customerMobile === '09127770001').campaign).toBe('expo-1405');
+
+    const res = await request(app).get('/api/analytics/timeseries?days=7').set(auth());
+    expect(res.body.totals.views).toBeGreaterThan(0);
+    expect(res.body.totals.leads).toBeGreaterThan(0);
+    expect(res.body.previous).toMatchObject({ views: expect.any(Number) });
+    // The previous period ends the day before this one starts.
+    expect(Date.parse(res.body.from) - Date.parse(res.body.previous.to)).toBe(86400000);
+    expect(res.body.byCampaign.find((c: any) => c.campaign === 'expo-1405')).toMatchObject({ views: 1, leads: 1 });
+  });
+
+  it('counts requests nobody answered for 48 hours', async () => {
+    const before = (await request(app).get('/api/analytics/summary').set(auth())).body.summary.overdueLeads;
+    await request(app).post('/api/leads').set('X-Forwarded-For', '10.5.0.51').send({ profileId: 'sara', customerName: 'مشتری قدیمی', customerMobile: '09125554433', ...CONSENT });
+    const id = (await request(app).get('/api/leads').set(auth())).body.leads.find((l: any) => l.customerMobile === '09125554433').id;
+    const sqlite = await import('../src/server/sqlite.ts');
+    const conn = sqlite.openDatabase(sqlite.getDbPath(process.env.DATA_DIR!));
+    conn.prepare('UPDATE leads SET created_at = ? WHERE id = ?').run(new Date(Date.now() - 50 * 3600000).toISOString(), id);
+    conn.close();
+    expect((await request(app).get('/api/analytics/summary').set(auth())).body.summary.overdueLeads).toBe(before + 1);
+    await request(app).put(`/api/leads/${id}`).set(auth()).send({ status: 'contacted' });
+    expect((await request(app).get('/api/analytics/summary').set(auth())).body.summary.overdueLeads).toBe(before);
+  });
+
+  it('deletes every request of a customer who asks, and only admins can', async () => {
+    await request(app).post('/api/leads').set('X-Forwarded-For', '10.5.0.52').send({ profileId: 'sara', customerName: 'حذفم کنید', customerMobile: '09123334455', ...CONSENT });
+    expect((await request(app).post('/api/leads/purge').send({ mobile: '09123334455' })).status).toBe(401);
+    expect((await request(app).post('/api/leads/purge').set(auth()).send({ mobile: '123' })).status).toBe(400);
+    expect((await request(app).post('/api/leads/purge').set(auth()).send({ closedOlderThanDays: 5 })).status).toBe(400);
+    const res = await request(app).post('/api/leads/purge').set(auth()).send({ mobile: '۰۹۱۲۳۳۳۴۴۵۵' });
+    expect(res.body.removed).toBe(1);
+    const leads = (await request(app).get('/api/leads').set(auth())).body.leads;
+    expect(leads.some((l: any) => l.customerMobile === '09123334455')).toBe(false);
+  });
+
+  it('keeps the printed-card status and NFC serial private', async () => {
+    const card = (await request(app).get('/api/profiles').set(auth())).body.profiles.find((p: any) => p.id === 'sara');
+    const saved = await request(app)
+      .put('/api/profiles/sara')
+      .set(auth())
+      .send({ ...card, physicalCard: 'delivered', nfcTagSerial: ' 04:A2:3B:11 ' });
+    expect(saved.body.profile).toMatchObject({ physicalCard: 'delivered', nfcTagSerial: '04:A2:3B:11' });
+    const pub = (await request(app).get('/api/profiles/sara')).body.profile;
+    expect(pub.physicalCard).toBeUndefined();
+    expect(pub.nfcTagSerial).toBeUndefined();
+    const bad = await request(app).put('/api/profiles/sara').set(auth()).send({ ...card, physicalCard: 'stolen' });
+    expect(bad.body.profile.physicalCard).toBeUndefined();
+  });
+});

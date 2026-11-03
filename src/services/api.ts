@@ -77,6 +77,14 @@ export type PublicCardResponse =
   | { kind: 'not-found' }
   | { kind: 'offline'; profile: EmployeeProfile | null };
 
+export interface RangeTotals {
+  views: number;
+  visitors: number;
+  interactions: number;
+  saves: number;
+  leads: number;
+}
+
 /** What an employee sees on their private edit page. */
 export interface SelfEditCard {
   name: string;
@@ -418,6 +426,9 @@ export const api = {
     days?: { day: string; views: number; visitors: number; interactions: number; leads: number }[];
     bySource?: { source: string; device: string; n: number }[];
     byProfile?: { profileId: string; views: number; interactions: number; saves: number; leads: number }[];
+    totals?: RangeTotals;
+    previous: (RangeTotals & { from: string; to: string }) | null;
+    byCampaign: { campaign: string; views: number; interactions: number; leads: number }[];
     error?: string;
   }> {
     const query = new URLSearchParams(
@@ -425,8 +436,24 @@ export const api = {
         .filter(([, v]) => v)
         .map(([k, v]) => [k, String(v)])
     ).toString();
-    const data = await call<{ days?: any[]; bySource?: any[]; byProfile?: any[] }>(`/api/analytics/timeseries${query ? `?${query}` : ''}`);
-    return { success: data.ok, days: data.days, bySource: data.bySource, byProfile: data.byProfile, error: data.error };
+    const data = await call<{
+      days?: any[];
+      bySource?: any[];
+      byProfile?: any[];
+      totals?: RangeTotals;
+      previous?: (RangeTotals & { from: string; to: string }) | null;
+      byCampaign?: { campaign: string; views: number; interactions: number; leads: number }[];
+    }>(`/api/analytics/timeseries${query ? `?${query}` : ''}`);
+    return {
+      success: data.ok,
+      days: data.days,
+      bySource: data.bySource,
+      byProfile: data.byProfile,
+      totals: data.totals,
+      previous: data.previous || null,
+      byCampaign: data.byCampaign || [],
+      error: data.error,
+    };
   },
 
   // ---------------- Leads ----------------
@@ -439,6 +466,7 @@ export const api = {
     note?: string;
     consent: boolean;
     source?: string;
+    campaign?: string;
     /** Honeypot: must stay empty. */
     website?: string;
   }): Promise<{ success: boolean; lead?: Pick<CustomerLead, 'id' | 'createdAt'>; message?: string; error?: string }> {
@@ -465,6 +493,11 @@ export const api = {
       'خطا در ذخیره پیگیری درخواست'
     );
     return { success: data.ok, lead: data.lead, error: data.error };
+  },
+
+  async purgeLeads(opts: { mobile?: string; closedOlderThanDays?: number }): Promise<{ success: boolean; removed?: number; error?: string }> {
+    const data = await call<{ removed?: number }>('/api/leads/purge', { method: 'POST', json: opts }, 'حذف درخواست‌ها انجام نشد');
+    return { success: data.ok, removed: data.removed, error: data.error };
   },
 
   async deleteLead(id: string): Promise<{ success: boolean; error?: string }> {
