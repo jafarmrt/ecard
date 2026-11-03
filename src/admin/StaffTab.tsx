@@ -6,7 +6,18 @@ import { copyToClipboard } from '../utils/clipboard';
 import { getDirectCardUrl } from '../utils/url';
 import { Button, Modal, StatusBadge, formatNumber, inputClass, useToast } from './ui';
 
-type Filter = 'current' | 'active' | 'inactive' | 'archived';
+type Filter = 'current' | 'active' | 'inactive' | 'archived' | 'incomplete';
+
+/** What a card is missing before it is handed to the employee (empty when complete). */
+export function missingFields(p: EmployeeProfile): string[] {
+  const missing: string[] = [];
+  if (!p.avatarUrl) missing.push('عکس');
+  if (!p.mobile) missing.push('موبایل');
+  if (!p.whatsapp) missing.push('واتساپ');
+  if (!p.title) missing.push('سمت');
+  if (!p.email) missing.push('ایمیل');
+  return missing;
+}
 
 export const StaffTab: React.FC<{
   profiles: EmployeeProfile[];
@@ -30,6 +41,7 @@ export const StaffTab: React.FC<{
       active: profiles.filter((p) => (p.status || 'active') === 'active').length,
       inactive: profiles.filter((p) => p.status === 'inactive').length,
       archived: profiles.filter((p) => p.status === 'archived').length,
+      incomplete: profiles.filter((p) => p.status !== 'archived' && missingFields(p).length > 0).length,
     }),
     [profiles]
   );
@@ -38,8 +50,9 @@ export const StaffTab: React.FC<{
 
   const visible = profiles.filter((p) => {
     const status = p.status || 'active';
-    if (filter === 'current' && status === 'archived') return false;
-    if (filter !== 'current' && status !== filter) return false;
+    if ((filter === 'current' || filter === 'incomplete') && status === 'archived') return false;
+    if (filter === 'incomplete' && missingFields(p).length === 0) return false;
+    if (filter !== 'current' && filter !== 'incomplete' && status !== filter) return false;
     const q = query.trim().toLowerCase();
     if (!q) return true;
     return [p.name, p.nameEn, p.title, p.mobile, p.department, p.slug, branchName(p.branchId)]
@@ -92,6 +105,7 @@ export const StaffTab: React.FC<{
     { id: 'active', label: 'فعال' },
     { id: 'inactive', label: 'غیرفعال' },
     { id: 'archived', label: 'بایگانی' },
+    { id: 'incomplete', label: 'ناقص' },
   ];
 
   const successors = profiles.filter((p) => p.id !== archiveTarget?.id && (p.status || 'active') === 'active');
@@ -172,6 +186,9 @@ export const StaffTab: React.FC<{
                       <span className="block text-xs text-stone-500 truncate" dir="ltr" style={{ textAlign: 'start' }}>
                         /{p.slug || p.id}
                       </span>
+                      {status !== 'archived' && missingFields(p).length > 0 && (
+                        <span className="block text-xs text-amber-800">بدون {missingFields(p).join('، ')}</span>
+                      )}
                       {status === 'archived' && (
                         <span className="block text-xs text-stone-500">
                           {successor ? `لینک به کارت ${successor.name} می‌رود` : 'لینک صفحه شرکت را نشان می‌دهد'}

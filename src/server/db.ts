@@ -174,6 +174,20 @@ export interface BulkBrandUpdatePayload {
 
 const now = () => new Date().toISOString();
 
+/** Iran has used a fixed UTC+03:30 (no daylight saving) since 2022; analytics days follow Tehran time. */
+const TEHRAN_OFFSET_MS = 210 * 60 * 1000;
+const TEHRAN_DAY_SQL = "strftime('%Y-%m-%d', created_at, '+210 minutes')";
+
+/** YYYY-MM-DD of the given moment in Tehran. */
+export function tehranDay(date: Date = new Date()): string {
+  return new Date(date.getTime() + TEHRAN_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/** UTC timestamp (ISO) at which the Tehran day `day` (+ `addDays`) starts. */
+export function tehranDayStartUtc(day: string, addDays = 0): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + addDays * 86400000 - TEHRAN_OFFSET_MS).toISOString();
+}
+
 function newSecret(): string {
   return crypto.randomBytes(32).toString('hex');
 }
@@ -1272,7 +1286,7 @@ export const db = {
       type = 'view';
       source = 'qr';
     }
-    const day = new Date().toISOString().slice(0, 10);
+    const day = tehranDay();
     const visitor =
       context.ip || context.userAgent
         ? crypto
@@ -1287,9 +1301,9 @@ export const db = {
     return { success: true, profileId: target.id };
   },
 
-  /** Daily counts between two dates (inclusive, YYYY-MM-DD, UTC). */
+  /** Daily counts between two dates (inclusive, YYYY-MM-DD, Tehran days). */
   getTimeSeries(opts: { from: string; to: string; profileId?: string }) {
-    const params: (string | number)[] = [opts.from, `${opts.to}T23:59:59.999Z`];
+    const params: (string | number)[] = [tehranDayStartUtc(opts.from), tehranDayStartUtc(opts.to, 1)];
     let filter = '';
     if (opts.profileId) {
       filter = ' AND profile_id = ?';
@@ -1297,24 +1311,24 @@ export const db = {
     }
     const events = conn()
       .prepare(
-        `SELECT substr(created_at, 1, 10) AS day,
+        `SELECT ${TEHRAN_DAY_SQL} AS day,
                 SUM(CASE WHEN type = 'view' THEN 1 ELSE 0 END) AS views,
                 COUNT(DISTINCT CASE WHEN type = 'view' THEN visitor END) AS visitors,
                 SUM(CASE WHEN type IN (${INTERACTION_TYPES.map(() => '?').join(',')}) THEN 1 ELSE 0 END) AS interactions
-         FROM events WHERE created_at >= ? AND created_at <= ?${filter}
+         FROM events WHERE created_at >= ? AND created_at < ?${filter}
          GROUP BY day ORDER BY day`
       )
       .all(...INTERACTION_TYPES, ...params) as { day: string; views: number; visitors: number; interactions: number }[];
     const leads = conn()
       .prepare(
-        `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS leads FROM leads WHERE created_at >= ? AND created_at <= ?${
+        `SELECT ${TEHRAN_DAY_SQL} AS day, COUNT(*) AS leads FROM leads WHERE created_at >= ? AND created_at < ?${
           opts.profileId ? ' AND profile_id = ?' : ''
         } GROUP BY day`
       )
       .all(...params) as { day: string; leads: number }[];
     const bySource = conn()
       .prepare(
-        `SELECT source, device, COUNT(*) AS n FROM events WHERE type = 'view' AND created_at >= ? AND created_at <= ?${filter} GROUP BY source, device`
+        `SELECT source, device, COUNT(*) AS n FROM events WHERE type = 'view' AND created_at >= ? AND created_at < ?${filter} GROUP BY source, device`
       )
       .all(...params) as { source: string; device: string; n: number }[];
     const leadMap = new Map(leads.map((l) => [l.day, l.leads]));
@@ -1329,9 +1343,35 @@ export const db = {
         if (!days.has(day)) days.set(day, { day, views: 0, visitors: 0, interactions: 0, leads: 0 });
       }
     }
+    // Per card in the same range, for the comparison table.
+    const perProfile = conn()
+      .prepare(
+        `SELECT profile_id AS profileId,
+                SUM(CASE WHEN type = 'view' THEN 1 ELSE 0 END) AS views,
+                SUM(CASE WHEN type IN (${INTERACTION_TYPES.map(() => '?').join(',')}) THEN 1 ELSE 0 END) AS interactions,
+                SUM(CASE WHEN type = 'vcardDownload' THEN 1 ELSE 0 END) AS saves
+         FROM events WHERE created_at >= ? AND created_at < ?${filter} GROUP BY profile_id`
+      )
+      .all(...INTERACTION_TYPES, ...params) as { profileId: string; views: number; interactions: number; saves: number }[];
+    const leadsPerProfile = conn()
+      .prepare(
+        `SELECT profile_id AS profileId, COUNT(*) AS leads FROM leads WHERE created_at >= ? AND created_at < ?${
+          opts.profileId ? ' AND profile_id = ?' : ''
+        } GROUP BY profile_id`
+      )
+      .all(...params) as { profileId: string; leads: number }[];
+    const byProfile = new Map<string, { profileId: string; views: number; interactions: number; saves: number; leads: number }>();
+    for (const r of perProfile) byProfile.set(r.profileId, { ...r, leads: 0 });
+    for (const r of leadsPerProfile) {
+      if (!r.profileId) continue;
+      const row = byProfile.get(r.profileId) || { profileId: r.profileId, views: 0, interactions: 0, saves: 0, leads: 0 };
+      row.leads = r.leads;
+      byProfile.set(r.profileId, row);
+    }
     return {
       days: [...days.values()].sort((a, b) => a.day.localeCompare(b.day)),
       bySource,
+      byProfile: [...byProfile.values()],
     };
   },
 
@@ -1354,11 +1394,28 @@ export const db = {
   },
 
   /** Expects input already validated by validateLeadInput(). */
-  addLead(payload: LeadInput & { source?: string }): { lead: CustomerLead } {
+  addLead(payload: LeadInput & { source?: string }): { lead: CustomerLead; merged?: boolean } {
     // Only attribute the lead when the card really exists; never guess.
     const found = payload.profileId ? findRow(payload.profileId) : undefined;
     const target = found ? followRedirect(found.row) || found.row : undefined;
     const name = target ? JSON.parse(target.data).name : 'نامشخص (کارت یافت نشد)';
+
+    // The same number for the same card within a day is one request, not a new one (double taps, retries).
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const previous = conn()
+      .prepare('SELECT * FROM leads WHERE customer_mobile = ? AND profile_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 1')
+      .get(payload.customerMobile, target ? target.id : '', since) as any;
+    if (previous) {
+      const notes = [previous.note, payload.note].filter(Boolean) as string[];
+      const note = [...new Set(notes)].join('\n').slice(0, 2000) || null;
+      const topic =
+        payload.topic && (LEAD_TOPICS as readonly string[]).includes(payload.topic) ? payload.topic : previous.topic;
+      conn()
+        .prepare('UPDATE leads SET customer_name = ?, customer_company = ?, topic = ?, note = ? WHERE id = ?')
+        .run(payload.customerName, payload.customerCompany ?? previous.customer_company ?? null, topic ?? null, note, previous.id);
+      return { lead: this.getAllLeads().find((l) => l.id === previous.id)!, merged: true };
+    }
+
     const lead: CustomerLead = {
       id: `lead_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
       profileId: target ? target.id : '',

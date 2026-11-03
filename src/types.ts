@@ -97,6 +97,8 @@ export interface EmployeeProfile {
   websiteUrl: string;
   catalogUrl?: string;
   catalogPdfUrl?: string;
+  /** Size of the catalog PDF in bytes, filled in by the server on the public card. */
+  catalogSizeBytes?: number;
   layoutDirection?: 'rtl' | 'ltr';
   email: string;
   address: string;

@@ -2,11 +2,12 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import rateLimit from 'express-rate-limit';
-import { db, getDataDir, toPublicProfile, ANALYTICS_EVENTS, AnalyticsEvent } from './db.ts';
+import { db, getDataDir, toPublicProfile, tehranDay, ANALYTICS_EVENTS, AnalyticsEvent } from './db.ts';
 import {
   decodeImageDataUrl,
   ensureOgImage,
   folderSize,
+  localUploadPath,
   getUploadsDir,
   storeImageUpload,
   storePdfUpload,
@@ -183,6 +184,21 @@ function sendError(res: Response, err: unknown, fallback: string) {
   }
   console.error(fallback, err);
   res.status(500).json({ success: false, error: fallback });
+}
+
+/** Size of a catalog PDF served by this app (uploaded or the bundled default), so visitors see it before downloading. */
+function catalogSize(url: string | undefined): number | undefined {
+  try {
+    let file = localUploadPath(url);
+    if (!file && url === '/roya-catalog.pdf') {
+      const uploaded = path.join(getUploadsDir(), 'roya-catalog.pdf');
+      const bundled = path.resolve(process.cwd(), 'public', 'roya-catalog.pdf');
+      file = fs.existsSync(uploaded) ? uploaded : fs.existsSync(bundled) ? bundled : null;
+    }
+    return file ? fs.statSync(file).size : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Inline base64 images inside a profile are optimised and stored as files before saving. */
@@ -417,7 +433,7 @@ export function createApp() {
     }
     res.json({
       success: true,
-      profile: toPublicProfile(result.profile),
+      profile: { ...toPublicProfile(result.profile), catalogSizeBytes: catalogSize(result.profile.catalogPdfUrl) },
       canonicalSlug: result.canonicalSlug,
       replacedFrom: result.replacedFrom ? { name: result.replacedFrom.name } : undefined,
     });
@@ -511,6 +527,12 @@ export function createApp() {
       res.status(400).json({ success: false, error: 'نوع رویداد نامعتبر است.' });
       return;
     }
+    // A logged-in admin opening a card (to check it) is not a visitor.
+    const { token } = requestToken(req);
+    if (token && db.validateToken(token)) {
+      res.json({ success: true, ignored: true });
+      return;
+    }
     const result = db.recordAnalyticsEvent(req.params.id, event, {
       source: req.body?.source,
       campaign: req.body?.campaign,
@@ -562,10 +584,11 @@ export function createApp() {
 
   // Daily numbers for charts. Defaults to the last 30 days.
   app.get('/api/analytics/timeseries', requireAdminAuth, (req, res) => {
-    const day = (d: Date) => d.toISOString().slice(0, 10);
+    // Days are Tehran days. ?days=N means the last N days including today.
     const isDay = (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
-    const to = isDay(req.query.to) ? String(req.query.to) : day(new Date());
-    const from = isDay(req.query.from) ? String(req.query.from) : day(new Date(Date.now() - 29 * 86400000));
+    const span = Math.min(400, Math.max(1, Number(req.query.days) || 30));
+    const to = isDay(req.query.to) ? String(req.query.to) : tehranDay();
+    const from = isDay(req.query.from) ? String(req.query.from) : tehranDay(new Date(Date.parse(`${to}T12:00:00Z`) - (span - 1) * 86400000));
     const profileId = req.query.profileId ? String(req.query.profileId) : undefined;
     res.json({ success: true, from, to, ...db.getTimeSeries({ from, to, profileId }) });
   });
@@ -616,7 +639,10 @@ export function createApp() {
       const photo = await vcardPhoto(profile.avatarUrl);
       const content = buildVCard(profile, { origin: resolveRequestOrigin(req), photo });
       res.setHeader('Content-Type', 'text/vcard; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${vcardFileName(profile)}"`);
+      // ?inline=1 (iPhone): Safari then opens the "add to contacts" sheet directly instead of a download.
+      const disposition = req.query.inline === '1' ? 'inline' : 'attachment';
+      res.setHeader('Content-Disposition', `${disposition}; filename="${vcardFileName(profile)}"`);
+      res.setHeader('Cache-Control', 'no-cache');
       res.send('﻿' + content);
     } catch (err) {
       next(err);

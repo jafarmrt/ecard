@@ -246,6 +246,18 @@ describe('leads', () => {
     expect(leads.find((l: any) => l.id === res.body.lead.id).profileId).toBe('');
   });
 
+  it('merges a repeated request from the same number for the same card into one', async () => {
+    const send = (note: string) =>
+      request(app).post('/api/leads').send({ profileId: 'sara', customerName: 'تکراری', customerMobile: '09127776655', note, ...CONSENT });
+    const first = await send('بار اول');
+    const second = await send('بار دوم');
+    expect(second.status).toBe(201);
+    expect(second.body.lead.id).toBe(first.body.lead.id);
+    const leads = (await request(app).get('/api/leads').set(auth())).body.leads.filter((l: any) => l.customerMobile === '09127776655');
+    expect(leads).toHaveLength(1);
+    expect(leads[0].note).toBe('بار اول\nبار دوم');
+  });
+
   it('silently drops honeypot submissions', async () => {
     const before = (await request(app).get('/api/leads').set(auth())).body.count;
     const res = await request(app)
@@ -282,7 +294,8 @@ describe('analytics', () => {
     expect(summary.totalNfcTaps).toBe(1);
 
     const series = (await request(app).get('/api/analytics/timeseries?profileId=sara').set(auth())).body;
-    const today = series.days.find((d: any) => d.day === new Date().toISOString().slice(0, 10));
+    const tehranToday = new Date(Date.now() + 210 * 60 * 1000).toISOString().slice(0, 10);
+    const today = series.days.find((d: any) => d.day === tehranToday);
     expect(today.views).toBe(1);
     expect(today.interactions).toBe(1);
     expect(series.bySource).toEqual([{ source: 'nfc', device: 'ios', n: 1 }]);
@@ -432,5 +445,38 @@ describe('pages', () => {
   it('sends basic security headers', async () => {
     const res = await request(app).get('/api/health');
     expect(res.headers['x-content-type-options']).toBe('nosniff');
+  });
+});
+
+describe('analytics details', () => {
+  it('does not count a logged-in admin opening a card', async () => {
+    const before = (await request(app).get('/api/analytics/summary').set(auth())).body.summary.totalViews;
+    const res = await request(app).post('/api/analytics/sara/event').set(auth()).send({ event: 'view' });
+    expect(res.body.ignored).toBe(true);
+    expect((await request(app).get('/api/analytics/summary').set(auth())).body.summary.totalViews).toBe(before);
+  });
+
+  it('groups days by Tehran time and compares cards over the same range', async () => {
+    const dbModule = await import('../src/server/db.ts');
+    // 22:00 UTC on 1 Feb is already 2 Feb in Tehran.
+    expect(dbModule.tehranDay(new Date('2026-02-01T22:00:00Z'))).toBe('2026-02-02');
+    expect(dbModule.tehranDayStartUtc('2026-02-02')).toBe('2026-02-01T20:30:00.000Z');
+
+    await request(app).post('/api/analytics/sara/event').set('User-Agent', 'Mozilla/5.0 (Linux; Android 14)').send({ event: 'view' });
+    const res = await request(app).get('/api/analytics/timeseries?days=7').set(auth());
+    expect(res.body.days).toHaveLength(7);
+    const sara = res.body.byProfile.find((r: any) => r.profileId === 'sara');
+    expect(sara.views).toBeGreaterThan(0);
+  });
+});
+
+describe('public card extras', () => {
+  it('opens the vCard inline for iPhone and reports the catalog size', async () => {
+    const inline = await request(app).get('/api/vcard/sara?inline=1');
+    expect(inline.status).toBe(200);
+    expect(inline.headers['content-disposition']).toMatch(/^inline/);
+    expect((await request(app).get('/api/vcard/sara')).headers['content-disposition']).toMatch(/^attachment/);
+    const card = await request(app).get('/api/profiles/sara');
+    if (card.body.profile.catalogPdfUrl === '/roya-catalog.pdf') expect(card.body.profile.catalogSizeBytes).toBeGreaterThan(0);
   });
 });

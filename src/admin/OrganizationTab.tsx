@@ -121,7 +121,7 @@ export const OrganizationTab: React.FC<{
               <option value="ltr">چپ به راست</option>
             </select>
           </Field>
-          <Field label="عنوان یا لینک کاتالوگ" htmlFor="org-catalog" hint="اگر لینک باشد، دکمه کاتالوگ آن را باز می‌کند؛ وگرنه فایل PDF زیر دانلود می‌شود." className="sm:col-span-2">
+          <Field label="عنوان یا لینک کاتالوگ" htmlFor="org-catalog" hint="اگر فایل PDF زیر آپلود شده باشد، دکمه کاتالوگ همان فایل را دانلود می‌کند. این لینک فقط وقتی باز می‌شود که PDF نباشد." className="sm:col-span-2">
             <input id="org-catalog" className={inputClass} value={form.catalogUrl || ''} onChange={(e) => set('catalogUrl', e.target.value)} />
           </Field>
         </div>
