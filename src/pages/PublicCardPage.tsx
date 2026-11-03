@@ -121,6 +121,14 @@ export const PublicCardPage: React.FC<{ identifier: string }> = ({ identifier })
     };
   }, [identifier]);
 
+  // Contact requests saved while this phone was offline go out as soon as it is back online.
+  useEffect(() => {
+    const send = () => void api.sendPendingLeads();
+    send();
+    window.addEventListener('online', send);
+    return () => window.removeEventListener('online', send);
+  }, []);
+
   const profile: EmployeeProfile | null =
     result?.kind === 'ok' ? result.profile : result?.kind === 'offline' ? result.profile : null;
 

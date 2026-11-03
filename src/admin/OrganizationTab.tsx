@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Upload, RotateCcw } from 'lucide-react';
+import { Loader2, Upload, RotateCcw, ImagePlus, X } from 'lucide-react';
+import { optimizeImage } from '../utils/imageOptimizer';
 import { EmployeeProfile, Organization } from '../types';
 import { api } from '../services/api';
 import { RoyaLogo } from '../components/RoyaLogo';
@@ -18,7 +19,10 @@ const EMPTY: Organization = {
   catalogUrl: '',
   catalogPdfUrl: '',
   layoutDirection: 'rtl',
+  gallery: [],
 };
+
+const MAX_GALLERY = 12;
 
 export const OrganizationTab: React.FC<{
   organization: Organization | null;
@@ -30,6 +34,7 @@ export const OrganizationTab: React.FC<{
   const [clearOverrides, setClearOverrides] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingGallery, setUploadingGallery] = useState(false);
 
   useEffect(() => {
     if (organization) setForm({ ...EMPTY, ...organization });
@@ -50,6 +55,32 @@ export const OrganizationTab: React.FC<{
     setUploadingLogo(false);
     if (res.success && res.url) set('logoUrl', res.url);
     else toast(res.error || 'آپلود لوگو انجام نشد.', 'error');
+  };
+
+  const addGalleryPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from<File>(e.target.files || []).filter((f) => f.type.startsWith('image/'));
+    e.target.value = '';
+    const room = MAX_GALLERY - (form.gallery?.length || 0);
+    if (!files.length) return;
+    if (room <= 0) return toast(`حداکثر ${MAX_GALLERY} عکس.`, 'error');
+    setUploadingGallery(true);
+    const added: string[] = [];
+    for (const file of files.slice(0, room)) {
+      try {
+        // Phone photos are large; 1600px is plenty for the card and keeps uploads fast.
+        const body = file.size > 1.5 * 1024 * 1024 ? (await optimizeImage(file, { maxWidth: 1600, maxHeight: 1600, quality: 0.85, format: 'image/jpeg' })).dataUrl : file;
+        const res = await api.uploadImage(body, 'gallery', 'gallery');
+        if (res.success && res.url) added.push(res.url);
+        else toast(res.error || 'آپلود یکی از عکس‌ها انجام نشد.', 'error');
+      } catch {
+        toast('یکی از عکس‌ها باز نشد.', 'error');
+      }
+    }
+    setUploadingGallery(false);
+    if (added.length) {
+      setForm((f) => ({ ...f, gallery: [...(f.gallery || []), ...added] }));
+      toast('عکس‌ها اضافه شد. برای نمایش روی کارت‌ها «ذخیره» را بزنید.');
+    }
   };
 
   const save = async () => {
@@ -124,6 +155,37 @@ export const OrganizationTab: React.FC<{
           <Field label="عنوان یا لینک کاتالوگ" htmlFor="org-catalog" hint="اگر فایل PDF زیر آپلود شده باشد، دکمه کاتالوگ همان فایل را دانلود می‌کند. این لینک فقط وقتی باز می‌شود که PDF نباشد." className="sm:col-span-2">
             <input id="org-catalog" className={inputClass} value={form.catalogUrl || ''} onChange={(e) => set('catalogUrl', e.target.value)} />
           </Field>
+        </div>
+
+        <div>
+          <h3 className="text-[13px] font-bold text-stone-800">نمونه‌کارها</h3>
+          <p className="text-[12px] text-stone-500 mt-0.5 mb-2 leading-relaxed">
+            عکس پروژه‌های انجام‌شده (حداکثر {MAX_GALLERY} عکس). پایین همه کارت‌ها به صورت یک ردیف قابل ورق زدن نشان داده می‌شود.
+          </p>
+          <ul className="flex flex-wrap gap-2">
+            {(form.gallery || []).map((url) => (
+              <li key={url} className="relative w-24 h-24 rounded-xl overflow-hidden border border-stone-200 bg-stone-100">
+                <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                <button
+                  type="button"
+                  onClick={() => set('gallery', (form.gallery || []).filter((u) => u !== url))}
+                  aria-label="حذف این عکس"
+                  className="absolute top-1 end-1 w-7 h-7 rounded-full bg-stone-900/70 hover:bg-stone-900 text-white flex items-center justify-center cursor-pointer"
+                >
+                  <X className="w-4 h-4" aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+            {(form.gallery?.length || 0) < MAX_GALLERY && (
+              <li>
+                <label className="w-24 h-24 rounded-xl border-2 border-dashed border-stone-300 hover:border-[#D0192A] text-stone-500 hover:text-[#D0192A] flex flex-col items-center justify-center gap-1 text-xs font-bold cursor-pointer focus-within:outline-2 focus-within:outline-[#D0192A]">
+                  {uploadingGallery ? <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" /> : <ImagePlus className="w-5 h-5" aria-hidden="true" />}
+                  افزودن عکس
+                  <input type="file" accept="image/*" multiple className="sr-only" onChange={(e) => void addGalleryPhotos(e)} disabled={uploadingGallery} />
+                </label>
+              </li>
+            )}
+          </ul>
         </div>
 
         <PdfUploader

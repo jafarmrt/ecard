@@ -17,7 +17,7 @@ import { ValidationError, validateLeadInput, validateSelfEditInput, RESERVED_SLU
 import { buildVCard, vcardFileName } from '../utils/vcardBuilder.ts';
 import type { Branch, EmployeeProfile, Organization, SelfEditValues } from '../types.ts';
 
-export const APP_VERSION = '3.3.0';
+export const APP_VERSION = '3.4.0';
 
 export function escapeHtml(str: string): string {
   return String(str || '')
@@ -909,7 +909,8 @@ export function createApp() {
         type = req.body.type ?? type;
         profileId = req.body.profileId ?? profileId;
       }
-      const url = await storeImageUpload(buffer, type === 'logo' ? 'logo' : 'avatar', String(profileId || 'staff'));
+      const prefix = type === 'logo' || type === 'gallery' ? type : 'avatar';
+      const url = await storeImageUpload(buffer, prefix, String(profileId || 'staff'));
       res.json({ success: true, url, message: 'تصویر با موفقیت روی سرور ذخیره شد.' });
     } catch (err) {
       sendError(res, err, 'خطا در آپلود تصویر');

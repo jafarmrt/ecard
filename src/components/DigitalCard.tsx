@@ -17,6 +17,9 @@ import {
   FileDown,
   UserPlus,
   Share2,
+  Clock,
+  Languages,
+  X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { EmployeeProfile } from '../types';
@@ -26,7 +29,9 @@ import { downloadVCard } from '../utils/vcard';
 import { downloadCatalogPdf, resolveCatalogUrl } from '../utils/catalog';
 import { api, AnalyticsEventName } from '../services/api';
 import { getBaseOrigin } from '../utils/url';
-import { telHref, whatsappNumber, toPersianDigits } from '../utils/phone';
+import { telHref, whatsappNumber, toPersianDigits, toEnglishDigits } from '../utils/phone';
+import { useEscapeKey } from '../hooks/useEscapeKey';
+import { CARD_TEXT, CardLang, initialCardLang } from './cardText';
 
 interface DigitalCardProps {
   profile: EmployeeProfile;
@@ -148,6 +153,49 @@ const WideTile: React.FC<{
   );
 };
 
+/** Project photos: a swipeable row, tap to see one full screen. */
+const Gallery: React.FC<{ images: string[]; t: (typeof CARD_TEXT)[CardLang]; isLtr: boolean }> = ({ images, t, isLtr }) => {
+  const [open, setOpen] = useState<number | null>(null);
+  useEscapeKey(open !== null, () => setOpen(null));
+  const step = (d: number) => setOpen((i) => (i === null ? i : (i + d + images.length) % images.length));
+  return (
+    <section className="pt-5" aria-label={t.gallery}>
+      <h2 className="text-[13px] font-bold text-stone-700 mb-2">{t.gallery}</h2>
+      <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1">
+        {images.map((src, i) => (
+          <button
+            key={src}
+            type="button"
+            onClick={() => setOpen(i)}
+            aria-label={t.galleryOpen(i + 1)}
+            className="snap-start shrink-0 w-[42%] aspect-[4/5] rounded-2xl overflow-hidden border border-stone-200 bg-stone-100 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#D0192A]"
+          >
+            <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+          </button>
+        ))}
+      </div>
+      {open !== null && (
+        <div role="dialog" aria-modal="true" aria-label={t.gallery} className="fixed inset-0 z-[60] bg-stone-950 flex items-center justify-center" onClick={() => setOpen(null)}>
+          <img src={images[open]} alt="" className="max-w-full max-h-[85dvh] object-contain" onClick={(e) => e.stopPropagation()} />
+          <button type="button" onClick={() => setOpen(null)} aria-label={t.close} className="absolute top-3 end-3 w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer">
+            <X className="w-6 h-6" aria-hidden="true" />
+          </button>
+          {images.length > 1 && (
+            <div className="absolute bottom-5 inset-x-0 flex justify-center gap-3" dir={isLtr ? 'ltr' : 'rtl'}>
+              <button type="button" onClick={(e) => { e.stopPropagation(); step(-1); }} aria-label={t.previous} className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer">
+                {isLtr ? <ChevronLeft className="w-6 h-6" aria-hidden="true" /> : <ChevronRight className="w-6 h-6" aria-hidden="true" />}
+              </button>
+              <button type="button" onClick={(e) => { e.stopPropagation(); step(1); }} aria-label={t.next} className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer">
+                {isLtr ? <ChevronRight className="w-6 h-6" aria-hidden="true" /> : <ChevronLeft className="w-6 h-6" aria-hidden="true" />}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+};
+
 export const DigitalCard: React.FC<DigitalCardProps> = ({
   profile,
   onOpenNavigation,
@@ -159,6 +207,20 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
   const [catalogDownloading, setCatalogDownloading] = useState(false);
   const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
   const [showStickyBar, setShowStickyBar] = useState(false);
+  const hasEnglish = Boolean(profile.nameEn?.trim());
+  const [lang, setLang] = useState<CardLang>(() => initialCardLang(hasEnglish));
+  const en = hasEnglish && lang === 'en';
+  const t = CARD_TEXT[en ? 'en' : 'fa'];
+  const digits = (v: string | undefined) => (en ? toEnglishDigits(v) : toPersianDigits(v));
+  const switchLang = () => {
+    const next: CardLang = en ? 'fa' : 'en';
+    setLang(next);
+    try {
+      localStorage.setItem('roya_card_lang', next);
+    } catch {
+      // ignore
+    }
+  };
   const saveButtonRef = useRef<HTMLButtonElement>(null);
   // Where the visitor came from (?src=nfc|qr|link, ?c=campaign); read once before the URL is cleaned.
   const visitRef = useRef<{ source: string; campaign: string } | null>(null);
@@ -196,7 +258,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
       }
       const url = new URL(window.location.href);
       let changed = false;
-      for (const key of ['src', 'ref', 'c', 'campaign']) {
+      for (const key of ['src', 'ref', 'c', 'campaign', 'lang']) {
         if (url.searchParams.has(key)) {
           url.searchParams.delete(key);
           changed = true;
@@ -219,7 +281,10 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
     return () => observer.disconnect();
   }, [isStandalone]);
 
-  const isLtr = profile.layoutDirection === 'ltr';
+  const isLtr = en || profile.layoutDirection === 'ltr';
+  const displayName = en ? profile.nameEn : profile.name;
+  const displayTitle = en ? profile.titleEn || profile.title : profile.title;
+  const displayCompany = en ? profile.companyEn || profile.company : profile.company;
   const telMobile = telHref(profile.mobile);
   const telLandline = telHref(profile.landline);
   const waNumber = whatsappNumber(profile.whatsapp);
@@ -229,13 +294,13 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
   // The label says what the button really does: download the PDF, or open the catalog website.
   const catalogIsPdf = /\.pdf($|\?)/i.test(catalogHref);
   const catalogLabel = catalogIsPdf
-    ? 'دانلود کاتالوگ محصولات'
+    ? t.catalogDownload
     : catalogHref.replace(/^https?:\/\//, '').replace(/\/$/, '');
   const catalogSize =
     catalogIsPdf && profile.catalogSizeBytes
       ? profile.catalogSizeBytes >= 1024 * 1024
-        ? `${toPersianDigits((profile.catalogSizeBytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, ''))} مگابایت`
-        : `${toPersianDigits(String(Math.max(1, Math.round(profile.catalogSizeBytes / 1024))))} کیلوبایت`
+        ? `${digits((profile.catalogSizeBytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, ''))} ${t.mb}`
+        : `${digits(String(Math.max(1, Math.round(profile.catalogSizeBytes / 1024))))} ${t.kb}`
       : '';
 
   const identifier = (profile.slug || profile.id).trim();
@@ -281,7 +346,22 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
     <div
       className="w-full max-w-[430px] mx-auto bg-white rounded-3xl p-4 sm:p-7 card-shadow border border-stone-100/90 transition-all duration-300"
       dir={isLtr ? 'ltr' : 'rtl'}
+      lang={en ? 'en' : 'fa'}
     >
+      {hasEnglish && (
+        <div className="flex justify-end -mt-1 sm:-mt-3 -mb-2">
+          <button
+            type="button"
+            onClick={switchLang}
+            aria-label={t.switchLabel}
+            lang={en ? 'fa' : 'en'}
+            className="inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border border-stone-200 bg-white text-[12px] font-bold text-stone-600 hover:text-[#D0192A] hover:border-red-200 cursor-pointer"
+          >
+            <Languages className="w-3.5 h-3.5" aria-hidden="true" />
+            {t.switchTo}
+          </button>
+        </div>
+      )}
       {/* 1. Brand logo */}
       <div className="pt-2 pb-5 flex flex-col items-center">
         <RoyaLogo size="md" logoUrl={profile.logoUrl} />
@@ -293,7 +373,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
           {profile.avatarUrl ? (
             <img
               src={profile.avatarUrl}
-              alt={`تصویر ${profile.name}`}
+              alt={t.avatarAlt(displayName)}
               width={104}
               height={104}
               className="w-full h-full rounded-full object-cover"
@@ -309,13 +389,13 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
         </div>
 
         {/* 3. Name and title */}
-        <h1 className="mt-3.5 text-2xl sm:text-[25px] font-black text-stone-800 text-center">{profile.name}</h1>
+        <h1 className="mt-3.5 text-2xl sm:text-[25px] font-black text-stone-800 text-center">{displayName}</h1>
         <div className="w-12 h-[2.5px] bg-[#D0192A] rounded-full mx-auto mt-2 mb-2.5" aria-hidden="true" />
-        {profile.title && (
-          <p className="text-[13.5px] text-stone-600 font-medium text-center leading-normal">{profile.title}</p>
+        {displayTitle && (
+          <p className="text-[13.5px] text-stone-600 font-medium text-center leading-normal">{displayTitle}</p>
         )}
-        {profile.company && (
-          <p className="text-[13.5px] text-stone-600 font-medium text-center leading-normal mt-0.5">{profile.company}</p>
+        {displayCompany && (
+          <p className="text-[13.5px] text-stone-600 font-medium text-center leading-normal mt-0.5">{displayCompany}</p>
         )}
       </div>
 
@@ -327,21 +407,21 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
               <HalfTile
                 id="btn-call-mobile"
                 href={`tel:${telMobile}`}
-                label="تماس"
-                value={toPersianDigits(profile.mobile)}
+                label={t.call}
+                value={digits(profile.mobile)}
                 icon={<Phone className="w-5 h-5 stroke-[1.8]" />}
-                ariaLabel={`تماس با موبایل ${profile.mobile}`}
+                ariaLabel={t.callAria(profile.mobile)}
                 onClick={() => track('call')}
               />
             )}
             {waNumber && (
               <HalfTile
                 id="btn-whatsapp"
-                href={`https://wa.me/${waNumber}?text=${encodeURIComponent('سلام وقت بخیر، از طریق کارت ویزیت دیجیتال با شما ارتباط می‌گیرم.')}`}
-                label="واتساپ"
-                value={toPersianDigits(profile.whatsapp)}
+                href={`https://wa.me/${waNumber}?text=${encodeURIComponent(t.whatsappMessage)}`}
+                label={t.whatsapp}
+                value={digits(profile.whatsapp)}
                 icon={<MessageCircle className="w-5 h-5 stroke-[1.8]" />}
-                ariaLabel={`پیام در واتساپ به ${profile.whatsapp}`}
+                ariaLabel={t.whatsappAria(profile.whatsapp)}
                 external
                 onClick={() => track('whatsapp')}
               />
@@ -355,10 +435,10 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
               <HalfTile
                 id="btn-call-landline"
                 href={`tel:${telLandline}`}
-                label="تلفن ثابت"
-                value={toPersianDigits(profile.landline)}
+                label={t.landline}
+                value={digits(profile.landline)}
                 icon={<PhoneCall className="w-5 h-5 stroke-[1.8]" />}
-                ariaLabel={`تماس با تلفن ثابت ${profile.landline}`}
+                ariaLabel={t.landlineAria(profile.landline)}
                 onClick={() => track('call')}
               />
             )}
@@ -366,10 +446,10 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
               <HalfTile
                 id="btn-instagram"
                 href={instagram.href}
-                label="اینستاگرام"
+                label={t.instagram}
                 value={instagram.handle}
                 icon={<Instagram className="w-5 h-5 stroke-[1.8]" />}
-                ariaLabel={`صفحه اینستاگرام ${instagram.handle}`}
+                ariaLabel={t.instagramAria(instagram.handle)}
                 external
                 onClick={() => track('instagram')}
               />
@@ -380,12 +460,12 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
         {website && (
           <WideTile
             id="btn-website"
-            label="وب سایت"
+            label={t.website}
             icon={<Globe className="w-5 h-5 stroke-[1.8]" />}
             isLtr={isLtr}
             href={website.href}
             external
-            ariaLabel={`وب‌سایت ${website.label}`}
+            ariaLabel={t.websiteAria(website.label)}
             onClick={() => track('website')}
           >
             <span className="text-[13.5px] text-stone-800 font-medium truncate" dir="ltr">
@@ -397,16 +477,16 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
         {catalogHref && (
           <WideTile
             id="btn-catalog"
-            label="کاتالوگ محصولات"
+            label={t.catalog}
             icon={<BookOpen className="w-5 h-5 stroke-[1.8]" />}
             isLtr={isLtr}
             onClick={handleDownloadCatalog}
-            ariaLabel={catalogIsPdf ? `دانلود کاتالوگ محصولات (PDF${catalogSize ? `، ${catalogSize}` : ''})` : `کاتالوگ محصولات: ${catalogLabel}`}
+            ariaLabel={catalogIsPdf ? `${t.catalogDownload} (PDF${catalogSize ? `, ${catalogSize}` : ''})` : `${t.catalog}: ${catalogLabel}`}
             trailing={<FileDown className="w-3.5 h-3.5 text-stone-400 group-hover:text-[#D0192A] transition-colors" />}
           >
             <span className="text-[13.5px] text-stone-800 font-medium truncate">
               {catalogDownloading ? (
-                <span className="text-emerald-700 font-bold">در حال دانلود کاتالوگ...</span>
+                <span className="text-emerald-700 font-bold">{t.catalogDownloading}</span>
               ) : (
                 <>
                   {catalogLabel}{' '}
@@ -424,11 +504,11 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
         {profile.email && (
           <WideTile
             id="btn-email"
-            label="ایمیل"
+            label={t.email}
             icon={<Mail className="w-5 h-5 stroke-[1.8]" />}
             isLtr={isLtr}
             href={`mailto:${profile.email}`}
-            ariaLabel={`ارسال ایمیل به ${profile.email}`}
+            ariaLabel={t.emailAria(profile.email)}
             onClick={() => track('email')}
           >
             <span className="text-[13.5px] text-stone-800 font-medium truncate" dir="ltr">
@@ -440,14 +520,30 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
         {profile.address && (
           <WideTile
             id="btn-address-routing"
-            label="آدرس و مسیریابی"
+            label={t.address}
             icon={<MapPin className="w-5 h-5 stroke-[1.8]" />}
             isLtr={isLtr}
             onClick={handleOpenRouting}
-            ariaLabel={`آدرس و مسیریابی: ${profile.address}`}
+            ariaLabel={`${t.address}: ${profile.address}`}
           >
-            <span className="text-[13px] text-stone-600 font-normal leading-relaxed">{toPersianDigits(profile.address)}</span>
+            <span className="text-[13px] text-stone-600 font-normal leading-relaxed" lang="fa" dir="rtl">
+              {toPersianDigits(profile.address)}
+            </span>
           </WideTile>
+        )}
+
+        {profile.workingHours && (
+          <div className="bg-white rounded-2xl border border-stone-200/90 flex items-center gap-3 p-3.5 sm:p-4">
+            <span className="w-9 h-9 flex items-center justify-center text-[#D0192A] shrink-0" aria-hidden="true">
+              <Clock className="w-5 h-5 stroke-[1.8]" />
+            </span>
+            <span className="flex flex-col min-w-0" style={{ textAlign: 'start' }}>
+              <span className="text-[12px] text-stone-500 font-medium leading-none mb-1">{t.hours}</span>
+              <span className="text-[13px] text-stone-700 leading-relaxed" lang="fa" dir="rtl">
+                {toPersianDigits(profile.workingHours)}
+              </span>
+            </span>
+          </div>
         )}
 
         {/* 5. Primary actions */}
@@ -464,8 +560,8 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
                 <Contact className="w-5 h-5 text-white" />
               </span>
               <span className="flex flex-col" style={{ textAlign: 'start' }}>
-                <span className="text-base sm:text-[17px] font-bold">ذخیره در مخاطبین</span>
-                <span className="text-[12px] text-white/90 font-light mt-0.5">افزودن اطلاعات به مخاطبین گوشی شما</span>
+                <span className="text-base sm:text-[17px] font-bold">{t.save}</span>
+                <span className="text-[12px] text-white/90 font-light mt-0.5">{t.saveHint}</span>
               </span>
             </span>
             <span className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0" aria-hidden="true">
@@ -476,13 +572,12 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
           <div aria-live="polite">
             {savedSuccess && (
               <p className="mt-2.5 p-3 bg-emerald-50 text-emerald-900 text-xs leading-relaxed rounded-xl border border-emerald-200">
-                {isIOS
-                  ? 'در صفحه‌ای که باز می‌شود «ایجاد مخاطب جدید» را بزنید. اگر از داخل اینستاگرام یا تلگرام آمده‌اید و صفحه‌ای باز نشد، این کارت را در Safari باز کنید.'
-                  : 'فایل مخاطب دانلود شد. آن را از اعلان دانلود باز کنید تا در دفترچه تلفن ذخیره شود. اگر از داخل اینستاگرام یا تلگرام آمده‌اید، اول صفحه را در Chrome باز کنید.'}
+                {isIOS ? t.savedIos : t.savedOther}
               </p>
             )}
           </div>
 
+          {!en && (
           <button
             id="btn-exchange-contact"
             type="button"
@@ -504,12 +599,15 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
               <ChevronLeft className="w-4 h-4 text-stone-400 shrink-0" aria-hidden="true" />
             )}
           </button>
+          )}
         </div>
+
+        {profile.gallery && profile.gallery.length > 0 && <Gallery images={profile.gallery} t={t} isLtr={isLtr} />}
 
         {/* 6. QR for passing the card on */}
         <div className="pt-5 pb-3 flex items-center justify-center gap-3" aria-hidden="true">
           <div className="flex-1 h-[1px] bg-stone-200" />
-          <span className="text-xs text-stone-500 font-normal px-2">اسکن یا اشتراک‌گذاری</span>
+          <span className="text-xs text-stone-500 font-normal px-2">{t.scanOrShare}</span>
           <div className="flex-1 h-[1px] bg-stone-200" />
         </div>
 
@@ -517,7 +615,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
           <button
             type="button"
             onClick={onOpenShare}
-            aria-label="بزرگنمایی کد QR و اشتراک‌گذاری کارت"
+            aria-label={t.qrAria}
             className="p-3 bg-white rounded-2xl border border-stone-200/90 shadow-xs hover:border-red-300 hover:shadow-md cursor-pointer transition-all duration-200"
           >
             <QRCodeSVG
@@ -535,7 +633,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
             className="mt-2.5 py-2 px-4 rounded-full bg-stone-100 hover:bg-stone-200/80 text-stone-700 hover:text-stone-900 text-[12px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Share2 className="w-3.5 h-3.5 text-[#D0192A]" aria-hidden="true" />
-            <span>اشتراک‌گذاری لینک کارت و بارکد</span>
+            <span>{t.share}</span>
           </button>
         </div>
       </div>
@@ -558,32 +656,32 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
             className="flex-1 min-h-12 rounded-xl bg-[#D0192A] hover:bg-[#B51221] text-white text-[13.5px] font-bold flex items-center justify-center gap-2 cursor-pointer"
           >
             {savedSuccess ? <Check className="w-4 h-4" aria-hidden="true" /> : <Contact className="w-4 h-4" aria-hidden="true" />}
-            ذخیره مخاطب
+            {t.saveShort}
           </button>
           {telMobile && (
             <a
               href={`tel:${telMobile}`}
               onClick={() => track('call')}
               tabIndex={showStickyBar ? 0 : -1}
-              aria-label={`تماس با ${profile.name}`}
+              aria-label={t.callAria(displayName)}
               className="min-h-12 min-w-12 px-3 rounded-xl border border-stone-200 text-[#D0192A] flex items-center justify-center gap-1.5 text-[13px] font-bold"
             >
               <Phone className="w-5 h-5" aria-hidden="true" />
-              <span>تماس</span>
+              <span>{t.call}</span>
             </a>
           )}
           {waNumber && (
             <a
-              href={`https://wa.me/${waNumber}?text=${encodeURIComponent('سلام وقت بخیر، از طریق کارت ویزیت دیجیتال با شما ارتباط می‌گیرم.')}`}
+              href={`https://wa.me/${waNumber}?text=${encodeURIComponent(t.whatsappMessage)}`}
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => track('whatsapp')}
               tabIndex={showStickyBar ? 0 : -1}
-              aria-label={`پیام در واتساپ به ${profile.name}`}
+              aria-label={t.whatsappAria(displayName)}
               className="min-h-12 min-w-12 px-3 rounded-xl border border-stone-200 text-emerald-700 flex items-center justify-center gap-1.5 text-[13px] font-bold"
             >
               <MessageCircle className="w-5 h-5" aria-hidden="true" />
-              <span>واتساپ</span>
+              <span>{t.whatsapp}</span>
             </a>
           )}
         </div>

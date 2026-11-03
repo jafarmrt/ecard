@@ -32,6 +32,29 @@ function setHint(on: boolean) {
 
 type Json = Record<string, any>;
 
+// Contact requests made without internet wait on the phone and are sent when it is back online.
+const PENDING_LEADS_KEY = 'roya_pending_leads';
+const PENDING_LEAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+type PendingLead = { payload: Json; at: number };
+
+function readPendingLeads(): PendingLead[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(PENDING_LEADS_KEY) || '[]');
+    return Array.isArray(list) ? list.filter((x) => x?.payload && Date.now() - Number(x.at) < PENDING_LEAD_TTL_MS) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingLeads(list: PendingLead[]) {
+  try {
+    if (list.length) localStorage.setItem(PENDING_LEADS_KEY, JSON.stringify(list.slice(-10)));
+    else localStorage.removeItem(PENDING_LEADS_KEY);
+  } catch {
+    // ignore (private mode)
+  }
+}
+
 /** fetch wrapper for the admin API: sends the session cookie and parses JSON errors. */
 async function call<T extends Json = Json>(
   url: string,
@@ -469,13 +492,36 @@ export const api = {
     campaign?: string;
     /** Honeypot: must stay empty. */
     website?: string;
-  }): Promise<{ success: boolean; lead?: Pick<CustomerLead, 'id' | 'createdAt'>; message?: string; error?: string }> {
+  }): Promise<{ success: boolean; queued?: boolean; lead?: Pick<CustomerLead, 'id' | 'createdAt'>; message?: string; error?: string }> {
     const data = await call<{ lead?: Pick<CustomerLead, 'id' | 'createdAt'>; message?: string }>(
       '/api/leads',
       { method: 'POST', json: payload },
       'خطا در ثبت اطلاعات تماس'
     );
+    if (data.status === 0) {
+      // No connection: keep it on this phone and send it later (see sendPendingLeads).
+      const list = readPendingLeads();
+      list.push({ payload, at: Date.now() });
+      writePendingLeads(list);
+      return { success: true, queued: true };
+    }
     return { success: data.ok, lead: data.lead, message: data.message, error: data.error };
+  },
+
+  /** Sends contact requests saved while offline. Kept only while the network or server is unavailable. */
+  async sendPendingLeads(): Promise<number> {
+    const list = readPendingLeads();
+    if (!list.length) return 0;
+    const keep: PendingLead[] = [];
+    let sent = 0;
+    for (const item of list) {
+      const res = await call('/api/leads', { method: 'POST', json: item.payload });
+      if (res.ok) sent++;
+      else if (res.status === 0 || res.status === 429 || res.status >= 500) keep.push(item);
+      // other errors (invalid data) would never succeed, so they are dropped
+    }
+    writePendingLeads(keep);
+    return sent;
   },
 
   async getLeads(): Promise<{ success: boolean; leads?: CustomerLead[]; error?: string }> {
@@ -554,7 +600,7 @@ export const api = {
   // ---------------- Uploads (raw file body, no base64) ----------------
   async uploadImage(
     file: Blob | string,
-    type: 'avatar' | 'logo',
+    type: 'avatar' | 'logo' | 'gallery',
     profileId?: string
   ): Promise<{ success: boolean; url?: string; error?: string }> {
     const blob = typeof file === 'string' ? dataUrlToBlob(file) : file;

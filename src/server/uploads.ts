@@ -78,7 +78,7 @@ export function persistBase64Image(dataUrl: string, prefix: 'avatar' | 'logo', i
  */
 export async function storeImageUpload(
   buffer: Buffer,
-  prefix: 'avatar' | 'logo',
+  prefix: 'avatar' | 'logo' | 'gallery',
   identifier = 'staff'
 ): Promise<string> {
   if (!buffer?.length) throw new ValidationError('فایل تصویر خالی است.');
@@ -86,7 +86,7 @@ export async function storeImageUpload(
   if (!sniffImageExtension(buffer)) {
     throw new ValidationError('فقط تصاویر PNG، JPG، WebP یا GIF پذیرفته می‌شوند.');
   }
-  const maxSize = prefix === 'logo' ? 1000 : 800;
+  const maxSize = prefix === 'gallery' ? 1400 : prefix === 'logo' ? 1000 : 800;
   let output: Buffer;
   try {
     output = await sharp(buffer, { animated: false, limitInputPixels: 40_000_000 })
