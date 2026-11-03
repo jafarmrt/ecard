@@ -258,6 +258,29 @@ describe('leads', () => {
     expect(leads[0].note).toBe('بار اول\nبار دوم');
   });
 
+  it('tracks the follow-up of a request and reopens it when the customer asks again', async () => {
+    const send = () =>
+      request(app).post('/api/leads').send({ profileId: 'sara', customerName: 'پیگیری', customerMobile: '09125554433', ...CONSENT });
+    const created = await send();
+    const id = created.body.lead.id;
+    let lead = (await request(app).get('/api/leads').set(auth())).body.leads.find((l: any) => l.id === id);
+    expect(lead.status).toBe('new');
+    expect((await request(app).get('/api/analytics/summary').set(auth())).body.summary.newLeads).toBeGreaterThan(0);
+
+    const upd = await request(app).put(`/api/leads/${id}`).set(auth()).send({ status: 'closed', followupNote: 'پیش‌فاکتور فرستاده شد' });
+    expect(upd.status).toBe(200);
+    expect(upd.body.lead.status).toBe('closed');
+    expect(upd.body.lead.followupNote).toBe('پیش‌فاکتور فرستاده شد');
+    expect((await request(app).put(`/api/leads/${id}`).set(auth()).send({ status: 'hacked' })).status).toBe(400);
+    expect((await request(app).put(`/api/leads/${id}`).send({ status: 'new' })).status).toBe(401);
+    expect((await request(app).put('/api/leads/nope').set(auth()).send({ status: 'new' })).status).toBe(404);
+
+    await send();
+    lead = (await request(app).get('/api/leads').set(auth())).body.leads.find((l: any) => l.id === id);
+    expect(lead.status).toBe('new');
+    expect(lead.followupNote).toBe('پیش‌فاکتور فرستاده شد');
+  });
+
   it('silently drops honeypot submissions', async () => {
     const before = (await request(app).get('/api/leads').set(auth())).body.count;
     const res = await request(app)

@@ -17,7 +17,7 @@ import { ValidationError, validateLeadInput, RESERVED_SLUGS } from './validation
 import { buildVCard, vcardFileName } from '../utils/vcardBuilder.ts';
 import type { Branch, EmployeeProfile, Organization } from '../types.ts';
 
-export const APP_VERSION = '3.0.0';
+export const APP_VERSION = '3.1.0';
 
 export function escapeHtml(str: string): string {
   return String(str || '')
@@ -568,6 +568,7 @@ export function createApp() {
       summary: {
         totalProfiles: profiles.filter((p) => p.status !== 'archived').length,
         totalLeads: db.getAllLeads().length,
+        newLeads: db.getAllLeads().filter((l) => (l.status || 'new') === 'new').length,
         ...totals,
         totalInteractions:
           totals.totalCalls +
@@ -594,12 +595,17 @@ export function createApp() {
   });
 
   // ---------------- Leads ----------------
-  app.post('/api/leads', leadLimiter, (req, res) => {
-    // Honeypot: real visitors never fill the hidden "website" field.
+  // Honeypot: real visitors never fill the hidden "website" field. Checked before the rate limit,
+  // so bot submissions (which are dropped anyway) do not use up the limit.
+  const leadHoneypot = (req: Request, res: Response, next: NextFunction) => {
     if (req.body?.website) {
       res.status(201).json({ success: true, message: 'اطلاعات تماس شما با موفقیت برای کارشناس ثبت شد.' });
       return;
     }
+    next();
+  };
+
+  app.post('/api/leads', leadHoneypot, leadLimiter, (req, res) => {
     try {
       const input = validateLeadInput(req.body);
       const { lead } = db.addLead({ ...input, source: req.body?.source });
@@ -616,6 +622,20 @@ export function createApp() {
   app.get('/api/leads', requireAdminAuth, (req, res) => {
     const leads = db.getAllLeads();
     res.json({ success: true, count: leads.length, leads });
+  });
+
+  app.put('/api/leads/:id', requireAdminAuth, (req, res) => {
+    try {
+      const lead = db.updateLead(req.params.id, { status: req.body?.status, followupNote: req.body?.followupNote });
+      if (!lead) {
+        res.status(404).json({ success: false, error: 'رکورد مورد نظر یافت نشد.' });
+        return;
+      }
+      audit(req, 'update', 'lead', lead.id, `${lead.customerName}: ${lead.status}`);
+      res.json({ success: true, lead });
+    } catch (err) {
+      sendError(res, err, 'خطا در ذخیره پیگیری درخواست');
+    }
   });
 
   app.delete('/api/leads/:id', requireAdminAuth, (req, res) => {

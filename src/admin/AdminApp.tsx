@@ -7,7 +7,7 @@ import { DigitalCard } from '../components/DigitalCard';
 import { NfcModal } from '../components/NfcModal';
 import { setConfiguredPublicOrigin } from '../utils/url';
 import { PWAInstallButton } from '../components/PWAInstallButton';
-import { ToastProvider, useToast } from './ui';
+import { ToastProvider, formatNumber, useToast } from './ui';
 import { LoginScreen } from './LoginScreen';
 import { StaffTab } from './StaffTab';
 import { ProfileFormModal } from './ProfileFormModal';
@@ -43,9 +43,16 @@ const Workspace: React.FC<{ onLoggedOut: () => void }> = ({ onLoggedOut }) => {
   const [editing, setEditing] = useState<{ profile: EmployeeProfile | null } | null>(null);
   const [qrProfile, setQrProfile] = useState<EmployeeProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [newLeads, setNewLeads] = useState(0);
 
   const loadAll = useCallback(async () => {
-    const [list, org, br] = await Promise.all([api.getProfiles(), api.getOrganization(), api.getBranches()]);
+    const [list, org, br, summary] = await Promise.all([
+      api.getProfiles(),
+      api.getOrganization(),
+      api.getBranches(),
+      api.getAnalyticsSummary(),
+    ]);
+    if (summary.success) setNewLeads(Number(summary.summary?.newLeads) || 0);
     if (org.success) setConfiguredPublicOrigin(org.publicOrigin);
     setProfiles(list);
     if (org.success && org.organization) setOrganization(org.organization);
@@ -112,6 +119,14 @@ const Workspace: React.FC<{ onLoggedOut: () => void }> = ({ onLoggedOut }) => {
                 >
                   <Icon className="w-4 h-4" aria-hidden="true" />
                   {label}
+                  {id === 'leads' && newLeads > 0 && (
+                    <span
+                      className="min-w-5 h-5 px-1.5 rounded-full bg-[#D0192A] text-white text-[11.5px] leading-5 text-center tabular-nums"
+                      aria-label={`${formatNumber(newLeads)} درخواست جدید`}
+                    >
+                      {formatNumber(newLeads)}
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
@@ -147,7 +162,7 @@ const Workspace: React.FC<{ onLoggedOut: () => void }> = ({ onLoggedOut }) => {
             )}
           </div>
         ) : tab === 'leads' ? (
-          <LeadsTab />
+          <LeadsTab profiles={profiles} onNewCountChange={setNewLeads} />
         ) : tab === 'analytics' ? (
           <AnalyticsTab profiles={profiles} />
         ) : tab === 'organization' ? (

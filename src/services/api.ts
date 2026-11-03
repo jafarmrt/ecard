@@ -445,6 +445,18 @@ export const api = {
     return { success: data.ok, leads: data.leads || [], error: data.error };
   },
 
+  async updateLead(
+    id: string,
+    changes: { status?: CustomerLead['status']; followupNote?: string }
+  ): Promise<{ success: boolean; lead?: CustomerLead; error?: string }> {
+    const data = await call<{ lead?: CustomerLead }>(
+      `/api/leads/${encodeURIComponent(id)}`,
+      { method: 'PUT', json: changes },
+      'خطا در ذخیره پیگیری درخواست'
+    );
+    return { success: data.ok, lead: data.lead, error: data.error };
+  },
+
   async deleteLead(id: string): Promise<{ success: boolean; error?: string }> {
     const data = await call(`/api/leads/${encodeURIComponent(id)}`, { method: 'DELETE' }, 'خطا در حذف رکورد مشتری');
     return { success: data.ok, error: data.error };

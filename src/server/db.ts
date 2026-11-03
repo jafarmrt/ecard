@@ -20,6 +20,7 @@ import type {
   AuditEntry,
   Branch,
   CustomerLead,
+  LeadStatus,
   EmployeeAnalytics,
   EmployeeProfile,
   MapLocation,
@@ -173,6 +174,8 @@ export interface BulkBrandUpdatePayload {
 // ---------------------------------------------------------------------------
 
 const now = () => new Date().toISOString();
+
+const LEAD_STATUSES: LeadStatus[] = ['new', 'contacted', 'closed'];
 
 /** Iran has used a fixed UTC+03:30 (no daylight saving) since 2022; analytics days follow Tehran time. */
 const TEHRAN_OFFSET_MS = 210 * 60 * 1000;
@@ -832,8 +835,8 @@ function deriveBranches(profiles: EmployeeProfile[]): { branches: Branch[]; byPr
 
 function importLegacyLeads(leads: any[]) {
   const insert = conn().prepare(
-    `INSERT OR REPLACE INTO leads (id, profile_id, profile_name, customer_name, customer_mobile, customer_company, topic, note, consent_at, source, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT OR REPLACE INTO leads (id, profile_id, profile_name, customer_name, customer_mobile, customer_company, topic, note, consent_at, source, created_at, status, followup_note, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   for (const l of leads || []) {
     if (!l || !l.id || !l.customerName) continue;
@@ -848,7 +851,10 @@ function importLegacyLeads(leads: any[]) {
       l.note || null,
       l.consentAt || null,
       l.source || null,
-      l.createdAt || now()
+      l.createdAt || now(),
+      ['new', 'contacted', 'closed'].includes(l.status) ? l.status : 'new',
+      l.followupNote ? String(l.followupNote).slice(0, 1000) : null,
+      l.updatedAt || null
     );
   }
 }
@@ -1390,7 +1396,32 @@ export const db = {
       consentAt: r.consent_at || undefined,
       source: r.source || undefined,
       createdAt: r.created_at,
+      status: (r.status || 'new') as LeadStatus,
+      followupNote: r.followup_note || undefined,
+      updatedAt: r.updated_at || undefined,
     }));
+  },
+
+  /** Records the follow-up of a contact request (status and/or note). */
+  updateLead(id: string, input: { status?: unknown; followupNote?: unknown }): CustomerLead | undefined {
+    const row = conn().prepare('SELECT * FROM leads WHERE id = ?').get(id) as any;
+    if (!row) return undefined;
+    let status = row.status || 'new';
+    if (input.status !== undefined) {
+      if (!LEAD_STATUSES.includes(input.status as LeadStatus)) throw new ValidationError('وضعیت درخواست معتبر نیست.');
+      status = input.status;
+    }
+    let note = row.followup_note;
+    if (input.followupNote !== undefined) {
+      note =
+        String(input.followupNote ?? '')
+          // eslint-disable-next-line no-control-regex -- strip control characters except line breaks
+          .replace(/[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F]/g, '')
+          .trim()
+          .slice(0, 1000) || null;
+    }
+    conn().prepare('UPDATE leads SET status = ?, followup_note = ?, updated_at = ? WHERE id = ?').run(status, note, now(), id);
+    return this.getAllLeads().find((l) => l.id === id);
   },
 
   /** Expects input already validated by validateLeadInput(). */
@@ -1411,8 +1442,8 @@ export const db = {
       const topic =
         payload.topic && (LEAD_TOPICS as readonly string[]).includes(payload.topic) ? payload.topic : previous.topic;
       conn()
-        .prepare('UPDATE leads SET customer_name = ?, customer_company = ?, topic = ?, note = ? WHERE id = ?')
-        .run(payload.customerName, payload.customerCompany ?? previous.customer_company ?? null, topic ?? null, note, previous.id);
+        .prepare("UPDATE leads SET customer_name = ?, customer_company = ?, topic = ?, note = ?, status = 'new', updated_at = ? WHERE id = ?")
+        .run(payload.customerName, payload.customerCompany ?? previous.customer_company ?? null, topic ?? null, note, now(), previous.id);
       return { lead: this.getAllLeads().find((l) => l.id === previous.id)!, merged: true };
     }
 

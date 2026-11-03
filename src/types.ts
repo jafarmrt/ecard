@@ -29,7 +29,14 @@ export interface CustomerLead {
   /** How the visitor reached the card: nfc, qr, link or a campaign code. */
   source?: string;
   createdAt: string;
+  /** Follow-up: new (nobody has called yet), contacted, closed. */
+  status?: LeadStatus;
+  /** What happened when the company called back. */
+  followupNote?: string;
+  updatedAt?: string;
 }
+
+export type LeadStatus = 'new' | 'contacted' | 'closed';
 
 export type ProfileStatus = 'active' | 'inactive' | 'archived';
 

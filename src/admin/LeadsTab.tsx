@@ -1,12 +1,52 @@
 import React, { useEffect, useState } from 'react';
 import { Download, Search, Phone, Contact, Trash2, RefreshCw, MessageCircle } from 'lucide-react';
-import { CustomerLead } from '../types';
+import { CustomerLead, EmployeeProfile, LeadStatus } from '../types';
 import { api } from '../services/api';
 import { LEAD_TOPICS } from '../utils/leadTopics';
 import { telHref, toPersianDigits, whatsappNumber } from '../utils/phone';
 import { Button, Section, downloadBlob, formatDate, formatNumber, inputClass, smallSelect, useToast } from './ui';
 
 const SOURCE_LABEL: Record<string, string> = { nfc: 'کارت NFC', qr: 'کد QR', link: 'لینک' };
+
+const STATUS_LABEL: Record<LeadStatus, string> = { new: 'جدید', contacted: 'تماس گرفته شد', closed: 'بسته شد' };
+const STATUS_STYLE: Record<LeadStatus, string> = {
+  new: 'bg-red-50 text-[#9E111E] border-red-200',
+  contacted: 'bg-amber-50 text-amber-900 border-amber-200',
+  closed: 'bg-emerald-50 text-emerald-900 border-emerald-200',
+};
+const statusOf = (l: CustomerLead): LeadStatus => l.status || 'new';
+
+/** Follow-up note, saved when the field loses focus or with the button. */
+const FollowupNote: React.FC<{ lead: CustomerLead; onSave: (note: string) => Promise<boolean> }> = ({ lead, onSave }) => {
+  const [value, setValue] = useState(lead.followupNote || '');
+  const [saving, setSaving] = useState(false);
+  const dirty = value.trim() !== (lead.followupNote || '');
+  const save = async () => {
+    if (!dirty || saving) return;
+    setSaving(true);
+    await onSave(value.trim());
+    setSaving(false);
+  };
+  return (
+    <div className="mt-1.5 flex gap-1.5 items-start">
+      <textarea
+        rows={1}
+        maxLength={1000}
+        aria-label={`یادداشت پیگیری ${lead.customerName}`}
+        className={`${inputClass} min-h-9 py-1.5 text-[12.5px] resize-y`}
+        placeholder="نتیجه تماس، مثلاً: پیش‌فاکتور فرستاده شد"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => void save()}
+      />
+      {dirty && (
+        <Button size="sm" tone="dark" onClick={() => void save()} disabled={saving}>
+          ذخیره
+        </Button>
+      )}
+    </div>
+  );
+};
 
 /** Leads come from a public form: neutralise values a spreadsheet would run as formulas. */
 export function csvCell(value?: string): string {
@@ -19,12 +59,45 @@ function vcardEscape(value: string) {
   return value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/([,;])/g, '\\$1');
 }
 
-export const LeadsTab: React.FC = () => {
+export const LeadsTab: React.FC<{ profiles: EmployeeProfile[]; onNewCountChange?: (n: number) => void }> = ({
+  profiles,
+  onNewCountChange,
+}) => {
   const toast = useToast();
   const [leads, setLeads] = useState<CustomerLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [topic, setTopic] = useState('');
+  const [status, setStatus] = useState<LeadStatus | ''>('');
+  const [owner, setOwner] = useState('');
+  const [period, setPeriod] = useState(0);
+
+  const counts = {
+    all: leads.length,
+    new: leads.filter((l) => statusOf(l) === 'new').length,
+    contacted: leads.filter((l) => statusOf(l) === 'contacted').length,
+    closed: leads.filter((l) => statusOf(l) === 'closed').length,
+  };
+
+  useEffect(() => {
+    if (!loading) onNewCountChange?.(counts.new);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [counts.new, loading]);
+
+  const owners = [...new Map(leads.map((l) => [l.profileId, l.profileName])).entries()]
+    .map(([id, name]) => ({ id, name: profiles.find((p) => p.id === id)?.name || name || 'نامشخص' }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'fa'));
+
+  const update = async (l: CustomerLead, changes: { status?: LeadStatus; followupNote?: string }) => {
+    const res = await api.updateLead(l.id, changes);
+    if (res.success && res.lead) {
+      setLeads((prev) => prev.map((x) => (x.id === l.id ? res.lead! : x)));
+      if (changes.followupNote !== undefined) toast('یادداشت ذخیره شد.');
+      return true;
+    }
+    toast(res.error || 'ذخیره انجام نشد.', 'error');
+    return false;
+  };
 
   const load = async () => {
     setLoading(true);
@@ -39,18 +112,22 @@ export const LeadsTab: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const since = period ? Date.now() - period * 86400000 : 0;
   const visible = leads.filter((l) => {
     if (topic && l.topic !== topic) return false;
+    if (status && statusOf(l) !== status) return false;
+    if (owner && l.profileId !== owner) return false;
+    if (since && Date.parse(l.createdAt) < since) return false;
     const q = query.trim().toLowerCase();
     if (!q) return true;
-    return [l.customerName, l.customerMobile, l.customerCompany, l.note, l.profileName, l.topic]
+    return [l.customerName, l.customerMobile, l.customerCompany, l.note, l.profileName, l.topic, l.followupNote]
       .filter(Boolean)
       .some((v) => String(v).toLowerCase().includes(q));
   });
 
   const exportCsv = () => {
     if (visible.length === 0) return toast('درخواستی برای خروجی وجود ندارد.', 'error');
-    const header = ['نام مشتری', 'موبایل', 'شرکت', 'موضوع', 'یادداشت', 'کارشناس', 'از طریق', 'تاریخ ثبت', 'رضایت تماس'];
+    const header = ['نام مشتری', 'موبایل', 'شرکت', 'موضوع', 'یادداشت', 'کارشناس', 'از طریق', 'تاریخ ثبت', 'رضایت تماس', 'وضعیت', 'نتیجه پیگیری'];
     const rows = visible.map((l) => [
       l.customerName,
       l.customerMobile,
@@ -61,6 +138,8 @@ export const LeadsTab: React.FC = () => {
       SOURCE_LABEL[l.source || ''] || l.source || '',
       formatDate(l.createdAt),
       l.consentAt ? formatDate(l.consentAt) : '',
+      STATUS_LABEL[statusOf(l)],
+      l.followupNote || '',
     ]);
     const csv = '\uFEFF' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     downloadBlob(csv, 'text/csv;charset=utf-8', `roya-leads-${new Date().toISOString().slice(0, 10)}.csv`);
@@ -94,7 +173,7 @@ export const LeadsTab: React.FC = () => {
   return (
     <Section
       title={`درخواست‌های تماس (${formatNumber(leads.length)})`}
-      description="مشتری‌هایی که از فرم «ارسال شماره برای کارشناس» روی کارت‌ها شماره گذاشته‌اند."
+      description="مشتری‌هایی که از فرم «ارسال شماره برای کارشناس» روی کارت‌ها شماره گذاشته‌اند. بعد از تماس، وضعیت را عوض کنید و نتیجه را یادداشت کنید."
       actions={
         <>
           <Button size="sm" onClick={() => void load()} disabled={loading}>
@@ -108,6 +187,27 @@ export const LeadsTab: React.FC = () => {
         </>
       }
     >
+      <div className="flex flex-wrap gap-1.5 mb-3" role="tablist" aria-label="وضعیت پیگیری">
+        {([
+          ['', 'همه', counts.all],
+          ['new', 'جدید', counts.new],
+          ['contacted', 'تماس گرفته شد', counts.contacted],
+          ['closed', 'بسته شد', counts.closed],
+        ] as [LeadStatus | '', string, number][]).map(([id, label, n]) => (
+          <button
+            key={id || 'all'}
+            type="button"
+            role="tab"
+            aria-selected={status === id}
+            onClick={() => setStatus(id)}
+            className={`min-h-9 px-3 rounded-xl border text-[12.5px] font-bold cursor-pointer ${
+              status === id ? 'bg-stone-900 text-white border-stone-900' : 'bg-white text-stone-700 border-stone-300 hover:bg-stone-100'
+            }`}
+          >
+            {label} ({formatNumber(n)})
+          </button>
+        ))}
+      </div>
       <div className="flex flex-wrap gap-2 mb-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="w-4 h-4 text-stone-400 absolute start-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
@@ -128,6 +228,20 @@ export const LeadsTab: React.FC = () => {
             </option>
           ))}
         </select>
+        <select aria-label="کارشناس" className={`${smallSelect} min-h-11`} value={owner} onChange={(e) => setOwner(e.target.value)}>
+          <option value="">همه کارشناس‌ها</option>
+          {owners.map((o) => (
+            <option key={o.id || 'none'} value={o.id}>
+              {o.name}
+            </option>
+          ))}
+        </select>
+        <select aria-label="بازه زمانی" className={`${smallSelect} min-h-11`} value={period} onChange={(e) => setPeriod(Number(e.target.value))}>
+          <option value={0}>همه زمان‌ها</option>
+          <option value={7}>۷ روز اخیر</option>
+          <option value={30}>۳۰ روز اخیر</option>
+          <option value={90}>۹۰ روز اخیر</option>
+        </select>
       </div>
 
       {loading && leads.length === 0 ? (
@@ -144,8 +258,11 @@ export const LeadsTab: React.FC = () => {
             const wa = whatsappNumber(l.customerMobile);
             return (
               <li key={l.id} className="py-3 flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 space-y-0.5">
+                <div className="min-w-0 flex-1 basis-[280px] space-y-0.5">
                   <p className="text-[14px] font-black text-stone-900">
+                    <span className={`inline-block align-middle me-1.5 px-2 py-0.5 rounded-md border text-[11.5px] font-bold ${STATUS_STYLE[statusOf(l)]}`}>
+                      {STATUS_LABEL[statusOf(l)]}
+                    </span>
                     {l.customerName}
                     {l.customerCompany && <span className="font-medium text-stone-600"> · {l.customerCompany}</span>}
                   </p>
@@ -157,9 +274,22 @@ export const LeadsTab: React.FC = () => {
                     برای {l.profileName}
                     {l.source && ` · از ${SOURCE_LABEL[l.source] || l.source}`} · {formatDate(l.createdAt)}
                   </p>
-                  {l.note && <p className="text-[12.5px] text-stone-700 bg-stone-50 rounded-lg px-2.5 py-1.5 mt-1">{l.note}</p>}
+                  {l.note && <p className="text-[12.5px] text-stone-700 bg-stone-50 rounded-lg px-2.5 py-1.5 mt-1 whitespace-pre-line">{l.note}</p>}
+                  <FollowupNote key={l.id} lead={l} onSave={(followupNote) => update(l, { followupNote })} />
                 </div>
                 <div className="flex flex-wrap gap-1.5">
+                  <select
+                    aria-label={`وضعیت درخواست ${l.customerName}`}
+                    className={`${smallSelect} min-h-9`}
+                    value={statusOf(l)}
+                    onChange={(e) => void update(l, { status: e.target.value as LeadStatus })}
+                  >
+                    {(Object.keys(STATUS_LABEL) as LeadStatus[]).map((k) => (
+                      <option key={k} value={k}>
+                        {STATUS_LABEL[k]}
+                      </option>
+                    ))}
+                  </select>
                   <a
                     href={`tel:${telHref(l.customerMobile)}`}
                     className="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-xl bg-[#D0192A] hover:bg-[#B51221] text-white text-[12.5px] font-bold"
