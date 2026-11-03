@@ -7,8 +7,7 @@ FROM node:22.13-alpine AS builder
 
 WORKDIR /app
 
-# نصب ابزارهای مورد نیاز کامپایل
-RUN apk add --no-cache python3 make g++
+# ابزار کامپایل (python/make/g++) لازم نیست: هیچ وابستگی بومی کامپایل نمی‌شود و sharp باینری آماده دارد.
 
 COPY package*.json ./
 RUN npm ci
@@ -38,9 +37,12 @@ COPY --from=builder /app/public ./public
 # داده واقعی در ایمیج نیست؛ پوشه data و uploads از volume می‌آیند (docker-compose.yml).
 # اگر data/database.json نسخه قبلی را در volume بگذارید، در اولین اجرا خودکار به SQLite منتقل می‌شود.
 RUN mkdir -p /app/public/uploads /app/data/backups && chown -R node:node /app
+COPY deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-USER node
-
+# کانتینر با root شروع می‌شود فقط برای اصلاح مالکیت دیسک‌های mount شده،
+# سپس برنامه با کاربر node (بدون دسترسی root) اجرا می‌شود.
 EXPOSE 3000
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "dist/server.cjs"]

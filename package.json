@@ -15,7 +15,8 @@
     "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild scripts/set-admin-password.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/admin-password.cjs",
     "typecheck": "tsc --noEmit",
     "admin:password:dev": "tsx scripts/set-admin-password.ts",
-    "verify-backup": "bash deploy/verify-backup.sh"
+    "verify-backup": "bash deploy/verify-backup.sh",
+    "local": "npm run build && node scripts/start-local.cjs"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
