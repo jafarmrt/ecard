@@ -224,7 +224,7 @@ export function createApp() {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self), nfc=(self)');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
     if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
     next();
   });

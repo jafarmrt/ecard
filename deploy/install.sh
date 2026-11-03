@@ -14,6 +14,9 @@
 #   sudo roya-card backup      پشتیبان فوری از پایگاه داده و عکس‌ها
 #   sudo roya-card password    تعیین رمز جدید پنل مدیریت
 #   sudo roya-card import DIR  انتقال داده و عکس‌های نسخه قبلی (مثلاً /var/www/roya-card)
+#   sudo roya-card domain card.royaco.com [EMAIL]
+#                              نصب Nginx، گرفتن گواهی رایگان HTTPS و تنظیم آدرس رسمی سایت
+#                              (قبلش رکورد DNS دامنه و پورت‌های ۸۰ و ۴۴۳ روی مودم/میکروتیک آماده باشد)
 #
 # تنظیمات اختیاری هنگام نصب (به صورت متغیر محیطی، مثلاً sudo env PORT=8080 bash install.sh):
 #   PORT           پورت برنامه                               (پیش‌فرض 3000)
@@ -358,6 +361,50 @@ cmd_import() {
   health_check && green "داده از $db_src منتقل شد${up_src:+ (عکس‌ها از $up_src)}." || die "برنامه بالا نیامد. لاگ: journalctl -u $APP_NAME -n 50"
 }
 
+cmd_domain() {
+  # Nginx جلوی برنامه + گواهی Let's Encrypt + PUBLIC_ORIGIN، برای دسترسی مشتری‌ها از اینترنت
+  need_root
+  local domain="${1:-}" email="${2:-}"
+  [ -n "$domain" ] || die "نام دامنه را بدهید، مثلاً:  sudo roya-card domain card.royaco.com"
+  [[ "$domain" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "دامنه معتبر نیست: $domain"
+  [ -f "$APP_DIR/deploy/nginx.conf" ] || die "برنامه نصب نیست. اول install.sh را اجرا کنید."
+
+  step "نصب Nginx و Certbot"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx certbot python3-certbot-nginx >/dev/null
+
+  step "پیکربندی Nginx برای $domain"
+  local conf="/etc/nginx/sites-available/$APP_NAME.conf"
+  sed -e "s/__DOMAIN__/$domain/g" -e "s/__PORT__/$PORT/g" "$APP_DIR/deploy/nginx.conf" > "$conf"
+  ln -sf "$conf" "/etc/nginx/sites-enabled/$APP_NAME.conf"
+  rm -f /etc/nginx/sites-enabled/default
+  nginx -t >/dev/null 2>&1 || { nginx -t; die "پیکربندی Nginx خطا دارد."; }
+  systemctl reload nginx
+
+  step "گرفتن گواهی HTTPS از Let's Encrypt"
+  local mail_args=(--register-unsafely-without-email)
+  [ -n "$email" ] && mail_args=(-m "$email")
+  if ! certbot --nginx -d "$domain" --redirect --agree-tos --non-interactive "${mail_args[@]}"; then
+    red "گواهی گرفته نشد. معمولاً یعنی دامنه هنوز از اینترنت به این سرور نمی‌رسد."
+    red "بررسی کنید: رکورد DNS دامنه به IP عمومی شرکت اشاره کند و پورت ۸۰ و ۴۴۳ روی میکروتیک به این سرور ($(lan_ip)) هدایت شده باشد."
+    die "بعد از اصلاح، همین دستور را دوباره اجرا کنید."
+  fi
+
+  step "تنظیم آدرس رسمی سایت"
+  if grep -qE '^#? *PUBLIC_ORIGIN=' "$ENV_FILE"; then
+    sed -i -E "s|^#? *PUBLIC_ORIGIN=.*|PUBLIC_ORIGIN=https://$domain|" "$ENV_FILE"
+  else
+    echo "PUBLIC_ORIGIN=https://$domain" >> "$ENV_FILE"
+  fi
+  systemctl restart "$APP_NAME"
+  if health_check && curl -fsS "https://$domain/api/health" >/dev/null 2>&1; then
+    green "سایت روی https://$domain آماده است. پنل: https://$domain/admin"
+  else
+    yellow "تنظیمات انجام شد، ولی این سرور نتوانست https://$domain را باز کند."
+    yellow "اگر از داخل شبکه شرکت باز نمی‌شود ولی با اینترنت گوشی باز می‌شود، مشکلی نیست (hairpin NAT میکروتیک)."
+  fi
+  green "گواهی هر ۹۰ روز خودکار تمدید می‌شود."
+}
+
 usage() {
   awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$0" | grep -v '^====' 
 }
@@ -371,6 +418,7 @@ case "${1:-install}" in
   backup) need_root; green "پشتیبان: $(snapshot_db)" ;;
   password) cmd_password "${2:-}" ;;
   import) cmd_import "${2:-}" ;;
+  domain) cmd_domain "${2:-}" "${3:-}" ;;
   -h|--help|help) usage ;;
   *) usage; exit 1 ;;
 esac

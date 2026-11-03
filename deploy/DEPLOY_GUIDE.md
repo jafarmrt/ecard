@@ -74,18 +74,27 @@ sudo roya-card import /var/www/roya-card
 
 ## دامنه و HTTPS (روی سرور اصلی)
 
-برنامه روی پورت ۳۰۰۰ اجرا می‌شود. برای دامنه و SSL، Nginx را جلوی آن بگذارید:
+مشتری با اینترنت گوشی خودش کارت را باز می‌کند، پس سرور باید از اینترنت با دامنه `card.royaco.com` و HTTPS در دسترس باشد. نوشتن NFC از مرورگر هم فقط با HTTPS کار می‌کند.
+
+**۱. شبکه (یک بار، توسط مسئول شبکه):**
+- یک IP عمومی ثابت برای اینترنت شرکت.
+- در پنل DNS دامنه `royaco.com` یک رکورد `A` با نام `card` که به همان IP اشاره کند.
+- روی میکروتیک، پورت‌های ۸۰ و ۴۴۳ به IP داخلی سرور هدایت شوند. نمونه (IP سرور را جایگزین کنید):
+  ```
+  /ip firewall nat add chain=dstnat in-interface-list=WAN protocol=tcp dst-port=80,443 action=dst-nat to-addresses=192.168.1.10 comment="roya-card"
+  ```
+  پورت ۸۰ برای گرفتن و تمدید گواهی HTTPS لازم است؛ آن را نبندید.
+- اگر از داخل شبکه شرکت سایت با دامنه باز نشد ولی با اینترنت گوشی باز شد، باید hairpin NAT میکروتیک را فعال کنید. برای مشتری‌ها مشکلی نیست.
+
+**۲. روی سرور (یک دستور):**
 
 ```bash
-sudo apt install -y nginx certbot python3-certbot-nginx
-sudo cp /opt/roya-card/deploy/nginx.conf /etc/nginx/sites-available/roya-card.conf
-sudo nano /etc/nginx/sites-available/roya-card.conf     # نام دامنه را اصلاح کنید
-sudo ln -s /etc/nginx/sites-available/roya-card.conf /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d card.royaco.com
+sudo roya-card domain card.royaco.com
 ```
 
-سپس در `/etc/roya-card.env` خط `PUBLIC_ORIGIN=https://card.royaco.com` را فعال کنید و `sudo roya-card restart` بزنید.
+این دستور Nginx را نصب و تنظیم می‌کند، گواهی رایگان Let's Encrypt می‌گیرد (هر ۹۰ روز خودکار تمدید می‌شود) و `PUBLIC_ORIGIN=https://card.royaco.com` را در `/etc/roya-card.env` می‌گذارد. اگر گواهی گرفته نشد، یعنی مرحله ۱ هنوز کامل نیست.
+
+> تا وقتی `https://card.royaco.com` از اینترنت گوشی باز نمی‌شود، کارت NFC ننویسید و QR چاپ نکنید. آدرس روی کارت چاپ‌شده دیگر عوض نمی‌شود.
 
 ## سرور بدون اینترنت آزاد
 
