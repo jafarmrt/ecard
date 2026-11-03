@@ -6,8 +6,18 @@ import { copyToClipboard } from '../utils/clipboard';
 import { getDirectCardUrl } from '../utils/url';
 import { Button, Modal, StatusBadge, formatNumber, inputClass, useToast } from './ui';
 import { EditLinkModal, EditRequestsPanel } from './SelfEditAdmin';
+import { PHYSICAL_CARD_LABEL } from './ProfileFormModal';
 
 type Filter = 'current' | 'active' | 'inactive' | 'archived' | 'incomplete';
+type Sort = 'default' | 'name' | 'views' | 'leads' | 'updated';
+
+const SORT_LABEL: Record<Sort, string> = {
+  default: 'ترتیب ساخت',
+  name: 'نام (الفبا)',
+  views: 'بیشترین بازدید',
+  leads: 'بیشترین درخواست',
+  updated: 'آخرین ویرایش',
+};
 
 /** What a card is missing before it is handed to the employee (empty when complete). */
 export function missingFields(p: EmployeeProfile): string[] {
@@ -38,6 +48,7 @@ export const StaffTab: React.FC<{
   const [successorId, setSuccessorId] = useState('');
   const [busy, setBusy] = useState(false);
   const [linkTarget, setLinkTarget] = useState<EmployeeProfile | null>(null);
+  const [sort, setSort] = useState<Sort>('default');
   const waitingFor = useMemo(() => new Set(editRequests.filter((r) => r.status === 'pending').map((r) => r.profileId)), [editRequests]);
 
   const counts = useMemo(
@@ -64,6 +75,15 @@ export const StaffTab: React.FC<{
       .filter(Boolean)
       .some((v) => String(v).toLowerCase().includes(q));
   });
+  if (sort !== 'default') {
+    const key: Record<Exclude<Sort, 'default'>, (a: EmployeeProfile, b: EmployeeProfile) => number> = {
+      name: (a, b) => a.name.localeCompare(b.name, 'fa'),
+      views: (a, b) => (b.analytics?.views || 0) - (a.analytics?.views || 0),
+      leads: (a, b) => (b.analytics?.leadCaptures || 0) - (a.analytics?.leadCaptures || 0),
+      updated: (a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
+    };
+    visible.sort(key[sort]);
+  }
 
   const copyLink = async (p: EmployeeProfile) => {
     const url = getDirectCardUrl(p);
@@ -130,6 +150,13 @@ export const StaffTab: React.FC<{
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
+        <select aria-label="مرتب‌سازی" className={`${inputClass} w-auto`} value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+          {(Object.keys(SORT_LABEL) as Sort[]).map((k) => (
+            <option key={k} value={k}>
+              {SORT_LABEL[k]}
+            </option>
+          ))}
+        </select>
         <Button tone="primary" onClick={() => onEdit(null)}>
           <Plus className="w-4 h-4" aria-hidden="true" />
           کارت جدید
@@ -194,6 +221,17 @@ export const StaffTab: React.FC<{
                       </span>
                       {status !== 'archived' && missingFields(p).length > 0 && (
                         <span className="block text-xs text-amber-800">بدون {missingFields(p).join('، ')}</span>
+                      )}
+                      {status !== 'archived' && (p.physicalCard || p.nfcTagSerial) && (
+                        <span className="block text-xs text-stone-500">
+                          کارت چاپی: {PHYSICAL_CARD_LABEL[p.physicalCard || 'none']}
+                          {p.nfcTagSerial && (
+                            <>
+                              {' · تگ '}
+                              <span dir="ltr">{p.nfcTagSerial}</span>
+                            </>
+                          )}
+                        </span>
                       )}
                       {waitingFor.has(p.id) && <span className="block text-xs font-bold text-amber-800">تغییرات فرستاده، منتظر تأیید شما</span>}
                       {status === 'archived' && (

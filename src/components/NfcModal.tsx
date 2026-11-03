@@ -24,6 +24,50 @@ import { isWebNfcSupported, writeUrlToNfc } from '../utils/nfc';
 import { copyToClipboard as universalCopy } from '../utils/clipboard';
 import { getDirectCardUrl, getBaseOrigin, hasConfiguredPublicOrigin, isInternalOrigin } from '../utils/url';
 
+/**
+ * Saves the QR code shown in `container` as a standalone SVG for the print shop:
+ * vector (sharp at any size), 40 mm wide, with the logo embedded in the file.
+ */
+async function downloadQrSvg(container: HTMLElement | null, fileName: string) {
+  const svg = container?.querySelector('svg');
+  if (!svg) return;
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('width', '40mm');
+  clone.setAttribute('height', '40mm');
+  for (const image of Array.from(clone.querySelectorAll('image'))) {
+    const href = image.getAttribute('href') || image.getAttribute('xlink:href');
+    if (!href || href.startsWith('data:')) continue;
+    try {
+      const blob = await (await fetch(href)).blob();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      image.setAttribute('href', dataUrl);
+    } catch {
+      image.remove(); // the code still scans without the logo (error correction H)
+    }
+  }
+  const content = `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
+  const url = URL.createObjectURL(new Blob([content], { type: 'image/svg+xml' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+const PHYSICAL_CARD_TEXT: Record<string, string> = {
+  ordered: 'سفارش داده شد',
+  delivered: 'تحویل شد',
+  lost: 'گم شده',
+};
+
 interface NfcModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -104,6 +148,8 @@ export const NfcModal: React.FC<NfcModalProps> = ({
       'لینک بارکد QR (همراه با ردیاب اسکن)',
       'لینک مستقیم کارت',
       'لینک دانلود مستقیم مخاطب (VCF)',
+      'شماره سریال تگ NFC',
+      'وضعیت کارت چاپی',
     ];
 
     const rows = staffList.map((p, idx) => {
@@ -121,6 +167,8 @@ export const NfcModal: React.FC<NfcModalProps> = ({
         escapeCsv(`${cardBase}?src=qr`),
         escapeCsv(cardBase),
         escapeCsv(`${origin}/api/vcard/${slugOrId}`),
+        escapeCsv(p.nfcTagSerial || ''),
+        escapeCsv(PHYSICAL_CARD_TEXT[p.physicalCard || ''] || 'سفارش داده نشده'),
       ];
     });
 
@@ -436,6 +484,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
                       key={p.id}
                       className="p-3.5 bg-white text-stone-900 rounded-2xl border border-stone-200 flex flex-col items-center text-center shadow-sm"
                     >
+                      <div data-qr={p.id}>
                       <QRCodeSVG
                         value={qrUrl}
                         size={116}
@@ -449,6 +498,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
                           excavate: true,
                         }}
                       />
+                      </div>
                       <span className="mt-2.5 text-xs font-black text-stone-900 truncate max-w-full">
                         {p.name}
                       </span>
@@ -458,6 +508,20 @@ export const NfcModal: React.FC<NfcModalProps> = ({
                       <span className="mt-1 text-xs font-mono text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100" dir="ltr">
                         /{p.slug || p.id}
                       </span>
+                      <button
+                        type="button"
+                        onClick={(e) =>
+                          void downloadQrSvg(
+                            (e.currentTarget.parentElement as HTMLElement).querySelector(`[data-qr="${CSS.escape(p.id)}"]`),
+                            `qr-${p.slug || p.id}.svg`
+                          )
+                        }
+                        className="mt-2 inline-flex items-center gap-1 min-h-8 px-2.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-bold text-stone-800 cursor-pointer"
+                        aria-label={`دانلود QR چاپی ${p.name}`}
+                      >
+                        <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                        SVG برای چاپ
+                      </button>
                     </div>
                   );
                 })}

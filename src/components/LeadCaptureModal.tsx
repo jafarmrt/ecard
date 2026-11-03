@@ -23,6 +23,8 @@ interface LeadCaptureModalProps {
   profile: EmployeeProfile;
   /** How the visitor reached the card (nfc / qr / link), stored with the lead. */
   source?: string;
+  /** Campaign code from a campaign link (?c=…). */
+  campaign?: string;
 }
 
 export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
@@ -30,6 +32,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
   onClose,
   profile,
   source,
+  campaign,
 }) => {
   const [customerName, setCustomerName] = useState('');
   const [customerMobile, setCustomerMobile] = useState('');
@@ -85,6 +88,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
         topic: topic || undefined,
         consent,
         source,
+        campaign: campaign || undefined,
         website: honeypot,
       });
 

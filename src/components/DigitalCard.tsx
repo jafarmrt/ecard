@@ -594,6 +594,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
       onClose={() => setIsLeadModalOpen(false)}
       profile={profile}
       source={visitRef.current?.source}
+      campaign={visitRef.current?.campaign}
     />
     </>
   );

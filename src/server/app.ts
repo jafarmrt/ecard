@@ -17,7 +17,7 @@ import { ValidationError, validateLeadInput, validateSelfEditInput, RESERVED_SLU
 import { buildVCard, vcardFileName } from '../utils/vcardBuilder.ts';
 import type { Branch, EmployeeProfile, Organization, SelfEditValues } from '../types.ts';
 
-export const APP_VERSION = '3.2.0';
+export const APP_VERSION = '3.3.0';
 
 export function escapeHtml(str: string): string {
   return String(str || '')
@@ -574,6 +574,7 @@ export function createApp() {
         totalLeads: db.getAllLeads().length,
         newLeads: db.getAllLeads().filter((l) => (l.status || 'new') === 'new').length,
         pendingEdits: db.countPendingEditRequests(),
+        overdueLeads: db.countOverdueLeads(),
         ...totals,
         totalInteractions:
           totals.totalCalls +
@@ -613,7 +614,7 @@ export function createApp() {
   app.post('/api/leads', leadHoneypot, leadLimiter, (req, res) => {
     try {
       const input = validateLeadInput(req.body);
-      const { lead } = db.addLead({ ...input, source: req.body?.source });
+      const { lead } = db.addLead({ ...input, source: req.body?.source, campaign: req.body?.campaign });
       res.status(201).json({
         success: true,
         lead: { id: lead.id, createdAt: lead.createdAt },
@@ -627,6 +628,25 @@ export function createApp() {
   app.get('/api/leads', requireAdminAuth, (req, res) => {
     const leads = db.getAllLeads();
     res.json({ success: true, count: leads.length, leads });
+  });
+
+  // Privacy: a customer asked to be forgotten, or old closed requests are cleared.
+  app.post('/api/leads/purge', requireAdminAuth, (req, res) => {
+    try {
+      const mobile = typeof req.body?.mobile === 'string' ? req.body.mobile : undefined;
+      const days = req.body?.closedOlderThanDays;
+      const removed = db.purgeLeads({ mobile, closedOlderThanDays: days });
+      audit(
+        req,
+        'delete',
+        'lead',
+        null,
+        mobile ? `حذف به درخواست مشتری: ${removed} درخواست` : `پاک‌سازی درخواست‌های بسته‌شده قدیمی‌تر از ${days} روز: ${removed}`
+      );
+      res.json({ success: true, removed });
+    } catch (err) {
+      sendError(res, err, 'حذف درخواست‌ها انجام نشد.');
+    }
   });
 
   app.put('/api/leads/:id', requireAdminAuth, (req, res) => {

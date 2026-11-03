@@ -146,6 +146,10 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX edit_requests_status ON edit_requests(status, created_at);
   `,
+  // 4: which campaign link (?c=…) a contact request came from
+  `
+  ALTER TABLE leads ADD COLUMN campaign TEXT;
+  `,
 ];
 
 export function getDbPath(dataDir: string): string {

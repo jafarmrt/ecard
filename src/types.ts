@@ -26,8 +26,10 @@ export interface CustomerLead {
   note?: string;
   /** When the visitor agreed to be contacted. */
   consentAt?: string;
-  /** How the visitor reached the card: nfc, qr, link or a campaign code. */
+  /** How the visitor reached the card: nfc, qr or link. */
   source?: string;
+  /** Campaign code from a campaign link (?c=…), if any. */
+  campaign?: string;
   createdAt: string;
   /** Follow-up: new (nobody has called yet), contacted, closed. */
   status?: LeadStatus;
@@ -63,6 +65,8 @@ export interface EditLinkInfo {
 }
 
 export type ProfileStatus = 'active' | 'inactive' | 'archived';
+
+export type PhysicalCardStatus = 'none' | 'ordered' | 'delivered' | 'lost';
 
 export interface MapLocation {
   lat: number;
@@ -148,6 +152,10 @@ export interface EmployeeProfile {
   archivedAt?: string;
   /** Earlier short links that still open this card. */
   previousSlugs?: string[];
+  /** Admin only: serial number printed on / read from the physical NFC tag. */
+  nfcTagSerial?: string;
+  /** Admin only: where the printed card is. */
+  physicalCard?: PhysicalCardStatus;
   /** Admin only: which inherited fields this card overrides. */
   overrides?: string[];
   createdAt?: string;
