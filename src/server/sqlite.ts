@@ -120,6 +120,13 @@ const MIGRATIONS: string[] = [
     expires_at INTEGER NOT NULL
   );
   `,
+  // 2: follow-up of contact requests (new -> contacted -> closed) with a short note
+  `
+  ALTER TABLE leads ADD COLUMN status TEXT NOT NULL DEFAULT 'new';
+  ALTER TABLE leads ADD COLUMN followup_note TEXT;
+  ALTER TABLE leads ADD COLUMN updated_at TEXT;
+  CREATE INDEX leads_status ON leads(status);
+  `,
 ];
 
 export function getDbPath(dataDir: string): string {

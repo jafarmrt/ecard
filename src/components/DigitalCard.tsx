@@ -226,17 +226,34 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
   const instagram = instagramDisplay(profile);
   const website = websiteDisplay(profile);
   const catalogHref = resolveCatalogUrl(profile);
-  const catalogLabel =
-    profile.catalogUrl && !/^\/|\.pdf$/i.test(profile.catalogUrl)
-      ? profile.catalogUrl.replace(/^https?:\/\//, '').replace(/\/$/, '')
-      : 'دانلود کاتالوگ محصولات';
+  // The label says what the button really does: download the PDF, or open the catalog website.
+  const catalogIsPdf = /\.pdf($|\?)/i.test(catalogHref);
+  const catalogLabel = catalogIsPdf
+    ? 'دانلود کاتالوگ محصولات'
+    : catalogHref.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const catalogSize =
+    catalogIsPdf && profile.catalogSizeBytes
+      ? profile.catalogSizeBytes >= 1024 * 1024
+        ? `${toPersianDigits((profile.catalogSizeBytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, ''))} مگابایت`
+        : `${toPersianDigits(String(Math.max(1, Math.round(profile.catalogSizeBytes / 1024))))} کیلوبایت`
+      : '';
 
   const identifier = (profile.slug || profile.id).trim();
+  const isIOS = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
   const cardUrl = `${getBaseOrigin()}/${identifier}?src=qr`;
 
   const handleSaveContact = async () => {
     track('vcardDownload');
-    const ok = await downloadVCard(profile);
+    let ok: boolean;
+    if (isStandalone && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+      // The server's vCard file (with photo) opens the phone's own "add contact" screen, also on iPhone
+      // and inside Instagram / Telegram, where a file built in the browser often cannot be saved.
+      const id = encodeURIComponent(identifier);
+      window.location.href = `/api/vcard/${id}${isIOS ? '?inline=1' : ''}`;
+      ok = true;
+    } else {
+      ok = await downloadVCard(profile);
+    }
     if (ok) {
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 6000);
@@ -258,7 +275,6 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
 
   const hasRow1 = !!telMobile || !!waNumber;
   const hasRow2 = !!telLandline || !!instagram;
-  const isIOS = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   return (
     <>
@@ -385,7 +401,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
             icon={<BookOpen className="w-5 h-5 stroke-[1.8]" />}
             isLtr={isLtr}
             onClick={handleDownloadCatalog}
-            ariaLabel="دانلود کاتالوگ محصولات (PDF)"
+            ariaLabel={catalogIsPdf ? `دانلود کاتالوگ محصولات (PDF${catalogSize ? `، ${catalogSize}` : ''})` : `کاتالوگ محصولات: ${catalogLabel}`}
             trailing={<FileDown className="w-3.5 h-3.5 text-stone-400 group-hover:text-[#D0192A] transition-colors" />}
           >
             <span className="text-[13.5px] text-stone-800 font-medium truncate">
@@ -393,7 +409,12 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
                 <span className="text-emerald-700 font-bold">در حال دانلود کاتالوگ...</span>
               ) : (
                 <>
-                  {catalogLabel} <span className="text-xs bg-red-50 text-[#D0192A] px-1.5 rounded font-bold border border-red-100">PDF</span>
+                  {catalogLabel}{' '}
+                  {catalogIsPdf && (
+                    <span className="text-xs bg-red-50 text-[#D0192A] px-1.5 rounded font-bold border border-red-100">
+                      PDF{catalogSize && ` · ${catalogSize}`}
+                    </span>
+                  )}
                 </>
               )}
             </span>
@@ -456,7 +477,7 @@ export const DigitalCard: React.FC<DigitalCardProps> = ({
             {savedSuccess && (
               <p className="mt-2.5 p-3 bg-emerald-50 text-emerald-900 text-xs leading-relaxed rounded-xl border border-emerald-200">
                 {isIOS
-                  ? 'فایل مخاطب دانلود شد. آن را باز کنید و «افزودن به مخاطبین» را بزنید. اگر از داخل اینستاگرام یا تلگرام آمده‌اید، اول صفحه را در Safari باز کنید.'
+                  ? 'در صفحه‌ای که باز می‌شود «ایجاد مخاطب جدید» را بزنید. اگر از داخل اینستاگرام یا تلگرام آمده‌اید و صفحه‌ای باز نشد، این کارت را در Safari باز کنید.'
                   : 'فایل مخاطب دانلود شد. آن را از اعلان دانلود باز کنید تا در دفترچه تلفن ذخیره شود. اگر از داخل اینستاگرام یا تلگرام آمده‌اید، اول صفحه را در Chrome باز کنید.'}
               </p>
             )}

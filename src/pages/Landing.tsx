@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Lock, LayoutDashboard } from 'lucide-react';
+import { LayoutDashboard } from 'lucide-react';
 import { RoyaLogo } from '../components/RoyaLogo';
 import { api } from '../services/api';
 
@@ -26,13 +26,15 @@ export const Landing: React.FC = () => {
         >
           ورود به وب‌سایت رویا
         </a>
-        <a
-          href="/admin"
-          className="mt-6 inline-flex items-center gap-1.5 min-h-11 px-3 text-[13px] text-stone-600 hover:text-stone-900 underline underline-offset-4"
-        >
-          {isAdmin ? <LayoutDashboard className="w-4 h-4" aria-hidden="true" /> : <Lock className="w-4 h-4" aria-hidden="true" />}
-          {isAdmin ? 'رفتن به پنل مدیریت' : 'ورود مدیر سامانه'}
-        </a>
+        {isAdmin && (
+          <a
+            href="/admin"
+            className="mt-6 inline-flex items-center gap-1.5 min-h-11 px-3 text-[13px] text-stone-600 hover:text-stone-900 underline underline-offset-4"
+          >
+            <LayoutDashboard className="w-4 h-4" aria-hidden="true" />
+            رفتن به پنل مدیریت
+          </a>
+        )}
       </main>
     </div>
   );

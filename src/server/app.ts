@@ -2,11 +2,12 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import rateLimit from 'express-rate-limit';
-import { db, getDataDir, toPublicProfile, ANALYTICS_EVENTS, AnalyticsEvent } from './db.ts';
+import { db, getDataDir, toPublicProfile, tehranDay, ANALYTICS_EVENTS, AnalyticsEvent } from './db.ts';
 import {
   decodeImageDataUrl,
   ensureOgImage,
   folderSize,
+  localUploadPath,
   getUploadsDir,
   storeImageUpload,
   storePdfUpload,
@@ -16,7 +17,7 @@ import { ValidationError, validateLeadInput, RESERVED_SLUGS } from './validation
 import { buildVCard, vcardFileName } from '../utils/vcardBuilder.ts';
 import type { Branch, EmployeeProfile, Organization } from '../types.ts';
 
-export const APP_VERSION = '3.0.0';
+export const APP_VERSION = '3.1.0';
 
 export function escapeHtml(str: string): string {
   return String(str || '')
@@ -185,6 +186,21 @@ function sendError(res: Response, err: unknown, fallback: string) {
   res.status(500).json({ success: false, error: fallback });
 }
 
+/** Size of a catalog PDF served by this app (uploaded or the bundled default), so visitors see it before downloading. */
+function catalogSize(url: string | undefined): number | undefined {
+  try {
+    let file = localUploadPath(url);
+    if (!file && url === '/roya-catalog.pdf') {
+      const uploaded = path.join(getUploadsDir(), 'roya-catalog.pdf');
+      const bundled = path.resolve(process.cwd(), 'public', 'roya-catalog.pdf');
+      file = fs.existsSync(uploaded) ? uploaded : fs.existsSync(bundled) ? bundled : null;
+    }
+    return file ? fs.statSync(file).size : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Inline base64 images inside a profile are optimised and stored as files before saving. */
 async function storeInlineImages<T extends Record<string, any>>(body: T, identifier: string): Promise<T> {
   const out: Record<string, any> = { ...body };
@@ -224,7 +240,7 @@ export function createApp() {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self), nfc=(self)');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
     if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
     next();
   });
@@ -417,7 +433,7 @@ export function createApp() {
     }
     res.json({
       success: true,
-      profile: toPublicProfile(result.profile),
+      profile: { ...toPublicProfile(result.profile), catalogSizeBytes: catalogSize(result.profile.catalogPdfUrl) },
       canonicalSlug: result.canonicalSlug,
       replacedFrom: result.replacedFrom ? { name: result.replacedFrom.name } : undefined,
     });
@@ -511,6 +527,12 @@ export function createApp() {
       res.status(400).json({ success: false, error: 'نوع رویداد نامعتبر است.' });
       return;
     }
+    // A logged-in admin opening a card (to check it) is not a visitor.
+    const { token } = requestToken(req);
+    if (token && db.validateToken(token)) {
+      res.json({ success: true, ignored: true });
+      return;
+    }
     const result = db.recordAnalyticsEvent(req.params.id, event, {
       source: req.body?.source,
       campaign: req.body?.campaign,
@@ -546,6 +568,7 @@ export function createApp() {
       summary: {
         totalProfiles: profiles.filter((p) => p.status !== 'archived').length,
         totalLeads: db.getAllLeads().length,
+        newLeads: db.getAllLeads().filter((l) => (l.status || 'new') === 'new').length,
         ...totals,
         totalInteractions:
           totals.totalCalls +
@@ -562,21 +585,27 @@ export function createApp() {
 
   // Daily numbers for charts. Defaults to the last 30 days.
   app.get('/api/analytics/timeseries', requireAdminAuth, (req, res) => {
-    const day = (d: Date) => d.toISOString().slice(0, 10);
+    // Days are Tehran days. ?days=N means the last N days including today.
     const isDay = (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
-    const to = isDay(req.query.to) ? String(req.query.to) : day(new Date());
-    const from = isDay(req.query.from) ? String(req.query.from) : day(new Date(Date.now() - 29 * 86400000));
+    const span = Math.min(400, Math.max(1, Number(req.query.days) || 30));
+    const to = isDay(req.query.to) ? String(req.query.to) : tehranDay();
+    const from = isDay(req.query.from) ? String(req.query.from) : tehranDay(new Date(Date.parse(`${to}T12:00:00Z`) - (span - 1) * 86400000));
     const profileId = req.query.profileId ? String(req.query.profileId) : undefined;
     res.json({ success: true, from, to, ...db.getTimeSeries({ from, to, profileId }) });
   });
 
   // ---------------- Leads ----------------
-  app.post('/api/leads', leadLimiter, (req, res) => {
-    // Honeypot: real visitors never fill the hidden "website" field.
+  // Honeypot: real visitors never fill the hidden "website" field. Checked before the rate limit,
+  // so bot submissions (which are dropped anyway) do not use up the limit.
+  const leadHoneypot = (req: Request, res: Response, next: NextFunction) => {
     if (req.body?.website) {
       res.status(201).json({ success: true, message: 'اطلاعات تماس شما با موفقیت برای کارشناس ثبت شد.' });
       return;
     }
+    next();
+  };
+
+  app.post('/api/leads', leadHoneypot, leadLimiter, (req, res) => {
     try {
       const input = validateLeadInput(req.body);
       const { lead } = db.addLead({ ...input, source: req.body?.source });
@@ -593,6 +622,20 @@ export function createApp() {
   app.get('/api/leads', requireAdminAuth, (req, res) => {
     const leads = db.getAllLeads();
     res.json({ success: true, count: leads.length, leads });
+  });
+
+  app.put('/api/leads/:id', requireAdminAuth, (req, res) => {
+    try {
+      const lead = db.updateLead(req.params.id, { status: req.body?.status, followupNote: req.body?.followupNote });
+      if (!lead) {
+        res.status(404).json({ success: false, error: 'رکورد مورد نظر یافت نشد.' });
+        return;
+      }
+      audit(req, 'update', 'lead', lead.id, `${lead.customerName}: ${lead.status}`);
+      res.json({ success: true, lead });
+    } catch (err) {
+      sendError(res, err, 'خطا در ذخیره پیگیری درخواست');
+    }
   });
 
   app.delete('/api/leads/:id', requireAdminAuth, (req, res) => {
@@ -616,7 +659,10 @@ export function createApp() {
       const photo = await vcardPhoto(profile.avatarUrl);
       const content = buildVCard(profile, { origin: resolveRequestOrigin(req), photo });
       res.setHeader('Content-Type', 'text/vcard; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${vcardFileName(profile)}"`);
+      // ?inline=1 (iPhone): Safari then opens the "add to contacts" sheet directly instead of a download.
+      const disposition = req.query.inline === '1' ? 'inline' : 'attachment';
+      res.setHeader('Content-Disposition', `${disposition}; filename="${vcardFileName(profile)}"`);
+      res.setHeader('Cache-Control', 'no-cache');
       res.send('﻿' + content);
     } catch (err) {
       next(err);

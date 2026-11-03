@@ -172,7 +172,7 @@ export const SystemTab: React.FC<{ profiles: EmployeeProfile[]; onRestored: () =
 
       <Section
         title="پشتیبان‌گیری"
-        description="سرور هر روز خودکار یک نسخه پشتیبان می‌سازد و ۱۴ نسخه آخر را نگه می‌دارد. برای امنیت بیشتر، هفته‌ای یک بار فایل پشتیبان را دانلود کنید و جای دیگری نگه دارید."
+        description="سرور هر روز خودکار یک نسخه از پایگاه داده می‌سازد و ۱۴ نسخه آخر را نگه می‌دارد. فایلی که اینجا دانلود می‌شود کارت‌ها، شعبه‌ها و درخواست‌ها را دارد، ولی عکس‌ها، کاتالوگ PDF و آمار بازدید در آن نیست. پشتیبان کامل (همراه عکس‌ها) روی سرور با دستور «sudo roya-card backup» در ‎/var/backups/roya-card‎ ساخته می‌شود؛ هر ماه یک بار آن پوشه را بیرون از سرور کپی کنید."
       >
         <div className="flex flex-wrap gap-2">
           <Button tone="dark" onClick={() => void snapshot()} disabled={busy}>

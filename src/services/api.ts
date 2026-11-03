@@ -403,15 +403,20 @@ export const api = {
     return { success: data.ok, summary: data.summary, error: data.error };
   },
 
-  async getTimeSeries(params: { from?: string; to?: string; profileId?: string } = {}): Promise<{
+  async getTimeSeries(params: { from?: string; to?: string; days?: number; profileId?: string } = {}): Promise<{
     success: boolean;
     days?: { day: string; views: number; visitors: number; interactions: number; leads: number }[];
     bySource?: { source: string; device: string; n: number }[];
+    byProfile?: { profileId: string; views: number; interactions: number; saves: number; leads: number }[];
     error?: string;
   }> {
-    const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
-    const data = await call<{ days?: any[]; bySource?: any[] }>(`/api/analytics/timeseries${query ? `?${query}` : ''}`);
-    return { success: data.ok, days: data.days, bySource: data.bySource, error: data.error };
+    const query = new URLSearchParams(
+      Object.entries(params)
+        .filter(([, v]) => v)
+        .map(([k, v]) => [k, String(v)])
+    ).toString();
+    const data = await call<{ days?: any[]; bySource?: any[]; byProfile?: any[] }>(`/api/analytics/timeseries${query ? `?${query}` : ''}`);
+    return { success: data.ok, days: data.days, bySource: data.bySource, byProfile: data.byProfile, error: data.error };
   },
 
   // ---------------- Leads ----------------
@@ -438,6 +443,18 @@ export const api = {
   async getLeads(): Promise<{ success: boolean; leads?: CustomerLead[]; error?: string }> {
     const data = await call<{ leads?: CustomerLead[] }>('/api/leads', {}, 'خطا در دریافت لیست مشتریان');
     return { success: data.ok, leads: data.leads || [], error: data.error };
+  },
+
+  async updateLead(
+    id: string,
+    changes: { status?: CustomerLead['status']; followupNote?: string }
+  ): Promise<{ success: boolean; lead?: CustomerLead; error?: string }> {
+    const data = await call<{ lead?: CustomerLead }>(
+      `/api/leads/${encodeURIComponent(id)}`,
+      { method: 'PUT', json: changes },
+      'خطا در ذخیره پیگیری درخواست'
+    );
+    return { success: data.ok, lead: data.lead, error: data.error };
   },
 
   async deleteLead(id: string): Promise<{ success: boolean; error?: string }> {

@@ -41,6 +41,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
   const [submitted, setSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [honeypot, setHoneypot] = useState('');
+  const [showMore, setShowMore] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -107,6 +108,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
     setNote('');
     setTopic('');
     setConsent(false);
+    setShowMore(false);
     setErrorMsg(null);
     onClose();
   };
@@ -254,26 +256,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                     value={customerMobile}
                     onChange={(e) => setCustomerMobile(e.target.value)}
                     placeholder="0912..."
-                    className="w-full pl-9 pr-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 font-mono text-left focus:outline-hidden focus:border-[#D0192A] focus:bg-white font-bold transition-colors"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="lead-company" className="block text-xs font-bold text-stone-700 mb-1">
-                  نام شرکت، مجموعه یا پروژه (اختیاری)
-                </label>
-                <div className="relative">
-                  <Building2 className="w-4 h-4 text-stone-400 absolute start-3.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                  <input
-                    id="lead-company"
-                    type="text"
-                    maxLength={120}
-                    autoComplete="organization"
-                    value={customerCompany}
-                    onChange={(e) => setCustomerCompany(e.target.value)}
-                    placeholder="مثلاً: گروه معماری پارس / پروژه الهیه"
-                    className="w-full ps-9 pe-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden focus:border-[#D0192A] focus:bg-white transition-colors"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 tabular-nums text-left focus:outline-hidden focus:border-[#D0192A] focus:bg-white font-bold transition-colors"
                   />
                 </div>
               </div>
@@ -300,19 +283,50 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
                     );
                   })}
                 </div>
-                <div className="relative">
-                  <MessageSquare className="w-4 h-4 text-stone-400 absolute start-3.5 top-3" aria-hidden="true" />
-                  <textarea
-                    rows={2}
-                    maxLength={1000}
-                    aria-label="توضیحات تکمیلی"
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="توضیحات تکمیلی، کد سمپل مدنظر یا زمان مناسب تماس (اختیاری)"
-                    className="w-full ps-9 pe-3.5 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden focus:border-[#D0192A] focus:bg-white transition-colors resize-none"
-                  />
-                </div>
               </fieldset>
+
+              {showMore ? (
+                <>
+                  <div>
+                    <label htmlFor="lead-company" className="block text-xs font-bold text-stone-700 mb-1">
+                      نام شرکت، مجموعه یا پروژه (اختیاری)
+                    </label>
+                    <div className="relative">
+                      <Building2 className="w-4 h-4 text-stone-400 absolute start-3.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
+                      <input
+                        id="lead-company"
+                        type="text"
+                        maxLength={120}
+                        autoComplete="organization"
+                        value={customerCompany}
+                        onChange={(e) => setCustomerCompany(e.target.value)}
+                        placeholder="مثلاً: گروه معماری پارس / پروژه الهیه"
+                        className="w-full ps-9 pe-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden focus:border-[#D0192A] focus:bg-white transition-colors"
+                      />
+                    </div>
+                  </div>
+                  <div className="relative">
+                    <MessageSquare className="w-4 h-4 text-stone-400 absolute start-3.5 top-3" aria-hidden="true" />
+                    <textarea
+                      rows={2}
+                      maxLength={1000}
+                      aria-label="توضیحات تکمیلی"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="توضیحات تکمیلی، کد سمپل مدنظر یا زمان مناسب تماس (اختیاری)"
+                      className="w-full ps-9 pe-3.5 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-hidden focus:border-[#D0192A] focus:bg-white transition-colors resize-none"
+                    />
+                  </div>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowMore(true)}
+                  className="text-[12.5px] font-bold text-[#B51221] hover:text-[#8E0F1A] min-h-9 cursor-pointer"
+                >
+                  + نام شرکت یا توضیحات (اختیاری)
+                </button>
+              )}
 
               <label htmlFor="lead-consent" className="flex items-start gap-2.5 p-3 rounded-xl bg-stone-50 border border-stone-200 cursor-pointer">
                 <input

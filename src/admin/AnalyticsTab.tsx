@@ -9,10 +9,6 @@ type Day = { day: string; views: number; visitors: number; interactions: number;
 const SOURCE_LABEL: Record<string, string> = { nfc: 'کارت NFC', qr: 'کد QR', link: 'لینک مستقیم' };
 const DEVICE_LABEL: Record<string, string> = { ios: 'آیفون', android: 'اندروید', desktop: 'کامپیوتر', other: 'سایر' };
 
-function isoDay(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
-
 const StatTile: React.FC<{ label: string; value: number; hint?: string }> = ({ label, value, hint }) => (
   <div className="bg-white border border-stone-200 rounded-2xl p-3.5">
     <p className="text-[12px] text-stone-600 font-medium">{label}</p>
@@ -79,17 +75,18 @@ export const AnalyticsTab: React.FC<{ profiles: EmployeeProfile[] }> = ({ profil
   const [profileId, setProfileId] = useState('');
   const [days, setDays] = useState<Day[]>([]);
   const [bySource, setBySource] = useState<{ source: string; device: string; n: number }[]>([]);
+  const [byProfile, setByProfile] = useState<{ profileId: string; views: number; interactions: number; saves: number; leads: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
     setLoading(true);
-    const to = new Date();
-    const from = new Date(Date.now() - (period - 1) * 86400000);
-    const res = await api.getTimeSeries({ from: isoDay(from), to: isoDay(to), profileId: profileId || undefined });
+    // The server counts days in Tehran time; it picks the range from the number of days.
+    const res = await api.getTimeSeries({ days: period, profileId: profileId || undefined });
     setLoading(false);
     if (res.success) {
       setDays(res.days || []);
       setBySource(res.bySource || []);
+      setByProfile(res.byProfile || []);
     } else toast(res.error || 'دریافت آمار انجام نشد.', 'error');
   };
 
@@ -127,13 +124,14 @@ export const AnalyticsTab: React.FC<{ profiles: EmployeeProfile[] }> = ({ profil
     };
   }, [bySource]);
 
+  // Same period as the numbers above, so the cards can be compared for "this month".
   const ranking = profiles
-    .filter((p) => p.status !== 'archived')
+    .filter((p) => p.status !== 'archived' && (!profileId || p.id === profileId))
     .map((p) => {
-      const a = p.analytics;
-      const interactions =
-        (a?.callClicks || 0) + (a?.whatsappClicks || 0) + (a?.vcardDownloads || 0) + (a?.catalogDownloads || 0) + (a?.mapClicks || 0);
-      return { p, views: a?.views || 0, interactions, leads: a?.leadCaptures || 0, saves: a?.vcardDownloads || 0 };
+      const r = byProfile.find((x) => x.profileId === p.id);
+      const views = r?.views || 0;
+      const leads = r?.leads || 0;
+      return { p, views, interactions: r?.interactions || 0, leads, saves: r?.saves || 0, rate: views ? leads / views : 0 };
     })
     .sort((a, b) => b.views - a.views);
 
@@ -200,7 +198,7 @@ export const AnalyticsTab: React.FC<{ profiles: EmployeeProfile[] }> = ({ profil
         )}
       </Section>
 
-      <Section title="مقایسه کارت‌ها" description="جمع کل از ابتدای راه‌اندازی.">
+      <Section title="مقایسه کارت‌ها" description={`در همان بازه بالا (${formatNumber(period)} روز اخیر).`}>
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
@@ -210,6 +208,7 @@ export const AnalyticsTab: React.FC<{ profiles: EmployeeProfile[] }> = ({ profil
                 <th className="text-start font-bold py-2">تماس و ذخیره</th>
                 <th className="text-start font-bold py-2">ذخیره مخاطب</th>
                 <th className="text-start font-bold py-2">درخواست</th>
+                <th className="text-start font-bold py-2">درخواست به بازدید</th>
               </tr>
             </thead>
             <tbody>
@@ -220,6 +219,7 @@ export const AnalyticsTab: React.FC<{ profiles: EmployeeProfile[] }> = ({ profil
                   <td className="py-2 tabular-nums">{formatNumber(r.interactions)}</td>
                   <td className="py-2 tabular-nums">{formatNumber(r.saves)}</td>
                   <td className="py-2 tabular-nums">{formatNumber(r.leads)}</td>
+                  <td className="py-2 tabular-nums">{r.views ? `${formatNumber(Math.round(r.rate * 100))}٪` : '—'}</td>
                 </tr>
               ))}
             </tbody>
