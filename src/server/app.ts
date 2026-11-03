@@ -335,7 +335,10 @@ export function createApp() {
 
   // ---------------- Organisation & branches ----------------
   app.get('/api/organization', requireAdminAuth, (req, res) => {
-    res.json({ success: true, organization: db.getOrganization() });
+    // publicOrigin: the official site address (PUBLIC_ORIGIN) so NFC/QR links never use the address
+    // the admin happened to open the panel with (e.g. a LAN IP). null when it is not configured.
+    const publicOrigin = process.env.PUBLIC_ORIGIN ? resolveRequestOrigin(req) : null;
+    res.json({ success: true, organization: db.getOrganization(), publicOrigin });
   });
 
   app.put('/api/organization', requireAdminAuth, async (req, res) => {

@@ -268,9 +268,9 @@ export const api = {
   },
 
   // ---------------- Organisation & branches ----------------
-  async getOrganization(): Promise<{ success: boolean; organization?: Organization; error?: string }> {
-    const data = await call<{ organization?: Organization }>('/api/organization');
-    return { success: data.ok, organization: data.organization, error: data.error };
+  async getOrganization(): Promise<{ success: boolean; organization?: Organization; publicOrigin?: string | null; error?: string }> {
+    const data = await call<{ organization?: Organization; publicOrigin?: string | null }>('/api/organization');
+    return { success: data.ok, organization: data.organization, publicOrigin: data.publicOrigin, error: data.error };
   },
 
   async updateOrganization(

@@ -128,6 +128,18 @@ describe('profiles', () => {
 });
 
 describe('organisation and branches', () => {
+  it('tells the admin panel the official site address for NFC and QR links', async () => {
+    const without = await request(app).get('/api/organization').set(auth());
+    expect(without.body.publicOrigin).toBeNull();
+    process.env.PUBLIC_ORIGIN = 'https://card.royaco.com/';
+    try {
+      const withOrigin = await request(app).get('/api/organization').set(auth()).set('Host', '192.168.1.10:3000');
+      expect(withOrigin.body.publicOrigin).toBe('https://card.royaco.com');
+    } finally {
+      delete process.env.PUBLIC_ORIGIN;
+    }
+  });
+
   it('applies a company-wide change to every card that does not override it', async () => {
     const res = await request(app).put('/api/organization').set(auth()).send({ website: 'royaco.ir' });
     expect(res.status).toBe(200);

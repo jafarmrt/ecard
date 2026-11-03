@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { 
   X, 
@@ -22,7 +22,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { EmployeeProfile } from '../types';
 import { isWebNfcSupported, writeUrlToNfc } from '../utils/nfc';
 import { copyToClipboard as universalCopy } from '../utils/clipboard';
-import { getDirectCardUrl, getBaseOrigin } from '../utils/url';
+import { getDirectCardUrl, getBaseOrigin, hasConfiguredPublicOrigin, isInternalOrigin } from '../utils/url';
 
 interface NfcModalProps {
   isOpen: boolean;
@@ -43,6 +43,10 @@ export const NfcModal: React.FC<NfcModalProps> = ({
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [includeNfcTrackingParam, setIncludeNfcTrackingParam] = useState<boolean>(true);
+  const writeAbortRef = useRef<AbortController | null>(null);
+
+  // Closing the window stops waiting for a tag.
+  useEffect(() => () => writeAbortRef.current?.abort(), []);
 
   useEscapeKey(isOpen, onClose);
 
@@ -52,6 +56,8 @@ export const NfcModal: React.FC<NfcModalProps> = ({
   const nfcTargetUrl = includeNfcTrackingParam ? `${baseCardUrl}?src=nfc` : baseCardUrl;
   const webNfcAvailable = isWebNfcSupported();
   const origin = getBaseOrigin();
+  const internalOrigin = isInternalOrigin(origin);
+  const originConfigured = hasConfiguredPublicOrigin();
   const staffList = allProfiles.length > 0 ? allProfiles : [profile];
 
   const handleWriteNfc = async () => {
@@ -59,13 +65,21 @@ export const NfcModal: React.FC<NfcModalProps> = ({
     setResult(null);
     setStatusText('لطفاً کارت یا برچسب NFC را به پشت گوشی نزدیک کنید...');
 
-    const res = await writeUrlToNfc(nfcTargetUrl, (status) => {
-      setStatusText(status);
-    });
-
+    const controller = new AbortController();
+    writeAbortRef.current = controller;
+    const res = await writeUrlToNfc(
+      nfcTargetUrl,
+      (status) => {
+        setStatusText(status);
+      },
+      controller.signal
+    );
+    if (writeAbortRef.current === controller) writeAbortRef.current = null;
     setIsWriting(false);
     setResult(res);
   };
+
+  const handleCancelWrite = () => writeAbortRef.current?.abort();
 
   const copyToClipboard = async (text: string, key: string) => {
     const ok = await universalCopy(text);
@@ -210,6 +224,19 @@ export const NfcModal: React.FC<NfcModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+          {internalOrigin && activeTab !== 'guide' && (
+            <div role="alert" className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-200 leading-relaxed flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+              <span>
+                <strong className="text-white">این لینک‌ها بیرون از شرکت باز نمی‌شوند.</strong>{' '}
+                آدرس <span dir="ltr" className="font-mono text-rose-100">{origin}</span> داخلی است یا HTTPS ندارد.{' '}
+                {originConfigured
+                  ? 'مقدار PUBLIC_ORIGIN در فایل .env سرور را به آدرس اصلی سایت (مثل https://card.royaco.com) تغییر دهید.'
+                  : 'در فایل .env سرور مقدار PUBLIC_ORIGIN را برابر آدرس اصلی سایت (مثل https://card.royaco.com) بگذارید و سرور را دوباره راه بیندازید.'}{' '}
+                تا آن موقع کارتی رایت یا قفل نکنید و فایل چاپخانه را نفرستید.
+              </span>
+            </div>
+          )}
           {/* TAB 1: SINGLE WRITER */}
           {activeTab === 'single' && (
             <div className="space-y-4">
@@ -279,6 +306,16 @@ export const NfcModal: React.FC<NfcModalProps> = ({
                       <p className="text-xs text-center text-amber-400 font-medium mt-2.5 animate-pulse">
                         {statusText}
                       </p>
+                    )}
+                    {isWriting && (
+                      <button
+                        type="button"
+                        onClick={handleCancelWrite}
+                        className="w-full mt-2.5 min-h-11 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                        <span>لغو رایت</span>
+                      </button>
                     )}
                   </div>
                 ) : (
@@ -475,7 +512,7 @@ export const NfcModal: React.FC<NfcModalProps> = ({
         <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between">
           <div className="text-xs text-slate-400 flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>سازگار با انواع گوشی‌های اپل آیفون و اندروید</span>
+            <span>خواندن کارت با آیفون و اندروید؛ رایت با Chrome اندروید یا اپ NFC Tools</span>
           </div>
           <button
             onClick={onClose}
