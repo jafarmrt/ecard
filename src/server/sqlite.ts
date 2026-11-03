@@ -127,6 +127,25 @@ const MIGRATIONS: string[] = [
   ALTER TABLE leads ADD COLUMN updated_at TEXT;
   CREATE INDEX leads_status ON leads(status);
   `,
+  // 3: employees edit a few fields of their own card through a private link; an admin approves
+  `
+  CREATE TABLE edit_links (
+    profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT
+  );
+  CREATE TABLE edit_requests (
+    id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    changes TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    decided_at TEXT,
+    ip TEXT
+  );
+  CREATE INDEX edit_requests_status ON edit_requests(status, created_at);
+  `,
 ];
 
 export function getDbPath(dataDir: string): string {

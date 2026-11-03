@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Users, Inbox, BarChart3, Building2, MapPin, Settings, LogOut, Loader2 } from 'lucide-react';
-import { Branch, EmployeeProfile, Organization } from '../types';
+import { Branch, EditLinkInfo, EditRequest, EmployeeProfile, Organization } from '../types';
 import { api } from '../services/api';
 import { RoyaLogo } from '../components/RoyaLogo';
 import { DigitalCard } from '../components/DigitalCard';
@@ -44,14 +44,21 @@ const Workspace: React.FC<{ onLoggedOut: () => void }> = ({ onLoggedOut }) => {
   const [qrProfile, setQrProfile] = useState<EmployeeProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [newLeads, setNewLeads] = useState(0);
+  const [editRequests, setEditRequests] = useState<EditRequest[]>([]);
+  const [editLinks, setEditLinks] = useState<EditLinkInfo[]>([]);
 
   const loadAll = useCallback(async () => {
-    const [list, org, br, summary] = await Promise.all([
+    const [list, org, br, summary, edits] = await Promise.all([
       api.getProfiles(),
       api.getOrganization(),
       api.getBranches(),
       api.getAnalyticsSummary(),
+      api.getEditRequests(),
     ]);
+    if (edits.success) {
+      setEditRequests(edits.requests);
+      setEditLinks(edits.links);
+    }
     if (summary.success) setNewLeads(Number(summary.summary?.newLeads) || 0);
     if (org.success) setConfiguredPublicOrigin(org.publicOrigin);
     setProfiles(list);
@@ -75,6 +82,7 @@ const Workspace: React.FC<{ onLoggedOut: () => void }> = ({ onLoggedOut }) => {
   }, [profiles, selectedId]);
 
   const selected = profiles.find((p) => p.id === selectedId) || null;
+  const pendingEdits = editRequests.filter((r) => r.status === 'pending').length;
 
   const logout = async () => {
     await api.logoutAdmin();
@@ -119,6 +127,14 @@ const Workspace: React.FC<{ onLoggedOut: () => void }> = ({ onLoggedOut }) => {
                 >
                   <Icon className="w-4 h-4" aria-hidden="true" />
                   {label}
+                  {id === 'staff' && pendingEdits > 0 && (
+                    <span
+                      className="min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-white text-[11.5px] leading-5 text-center tabular-nums"
+                      aria-label={`${formatNumber(pendingEdits)} تغییر منتظر تأیید`}
+                    >
+                      {formatNumber(pendingEdits)}
+                    </span>
+                  )}
                   {id === 'leads' && newLeads > 0 && (
                     <span
                       className="min-w-5 h-5 px-1.5 rounded-full bg-[#D0192A] text-white text-[11.5px] leading-5 text-center tabular-nums"
@@ -151,6 +167,8 @@ const Workspace: React.FC<{ onLoggedOut: () => void }> = ({ onLoggedOut }) => {
               onEdit={(profile) => setEditing({ profile })}
               onOpenQr={setQrProfile}
               onChanged={loadAll}
+              editRequests={editRequests}
+              editLinks={editLinks}
             />
             {selected && (
               <aside className="hidden lg:block sticky top-32" aria-label="پیش‌نمایش کارت">

@@ -60,7 +60,7 @@ export function getQueryCardUrl(profile: EmployeeProfile): string {
   return `${origin}/?id=${profile.id}&view=card`;
 }
 
-export type AppRoute = { kind: 'admin' } | { kind: 'card'; identifier: string } | { kind: 'landing' };
+export type AppRoute = { kind: 'admin' } | { kind: 'self-edit' } | { kind: 'card'; identifier: string } | { kind: 'landing' };
 
 /**
  * Which screen the current URL asks for:
@@ -75,6 +75,8 @@ export function resolveRoute(): AppRoute {
     if (path !== 'admin') window.history.replaceState(null, '', '/admin');
     return { kind: 'admin' };
   }
+  // An employee's private link to change a few fields of their own card (/edit#<secret>).
+  if (path === 'edit') return { kind: 'self-edit' };
   const queryId = params.get('id') || params.get('card') || params.get('profile');
   if (queryId) return { kind: 'card', identifier: queryId.trim() };
   if (path.startsWith('card/')) {

@@ -503,3 +503,99 @@ describe('public card extras', () => {
     if (card.body.profile.catalogPdfUrl === '/roya-catalog.pdf') expect(card.body.profile.catalogSizeBytes).toBeGreaterThan(0);
   });
 });
+
+describe('employee self edit', () => {
+  const PROFILE = { id: 'neda', name: 'ندا احمدی', title: 'کارشناس فروش', mobile: '09121112233', whatsapp: '09121112233', email: 'old@royaco.com' };
+
+  async function setup() {
+    await request(app).post('/api/profiles').set(auth()).send(PROFILE);
+    const link = await request(app).post('/api/profiles/neda/edit-link').set(auth());
+    expect(link.status).toBe(201);
+    return String(link.body.url).split('#')[1];
+  }
+
+  it('needs a valid private link and only admins can create one', async () => {
+    expect((await request(app).post('/api/profiles/neda/edit-link')).status).toBe(401);
+    expect((await request(app).get('/api/self-edit')).status).toBe(404);
+    expect((await request(app).get('/api/self-edit').set('X-Edit-Token', 'x'.repeat(32))).status).toBe(404);
+    const token = await setup();
+    const res = await request(app).get('/api/self-edit').set('X-Edit-Token', token);
+    expect(res.status).toBe(200);
+    expect(res.headers['x-robots-tag']).toMatch(/noindex/);
+    expect(res.body.card.name).toBe(PROFILE.name);
+    expect(res.body.card.values.email).toBe('old@royaco.com');
+    // Only the hash is stored, never the link itself.
+    const links = (await request(app).get('/api/edit-requests').set(auth())).body.links;
+    expect(JSON.stringify(links)).not.toContain(token);
+  });
+
+  it('keeps changes pending until an admin approves them', async () => {
+    const token = await setup();
+    const sent = await request(app)
+      .post('/api/self-edit')
+      .set('X-Edit-Token', token)
+      .send({ email: 'Neda@RoyaCo.com', instagram: 'https://www.instagram.com/neda.design/', whatsapp: '۰۹۳۵ ۱۲۳ ۴۵۶۷', name: 'hacker', photo: PNG_1PX });
+    expect(sent.status).toBe(201);
+    const pending = sent.body.card.pending;
+    expect(pending.changes).toMatchObject({ email: 'neda@royaco.com', instagram: 'neda.design', whatsapp: '09351234567' });
+    expect(pending.changes.avatarUrl).toMatch(/^\/uploads\//);
+    expect(pending.changes.name).toBeUndefined();
+
+    // Not live yet.
+    expect((await request(app).get('/api/profiles/neda')).body.profile.email).toBe('old@royaco.com');
+    expect((await request(app).get('/api/analytics/summary').set(auth())).body.summary.pendingEdits).toBeGreaterThan(0);
+    // The photo is kept while the request waits.
+    expect(db.referencedUploads().has(pending.changes.avatarUrl)).toBe(true);
+
+    const approved = await request(app).post(`/api/edit-requests/${pending.id}/approve`).set(auth());
+    expect(approved.status).toBe(200);
+    const card = (await request(app).get('/api/profiles/neda')).body.profile;
+    expect(card.email).toBe('neda@royaco.com');
+    expect(card.whatsapp).toBe('09351234567');
+    expect(card.instagramUrl).toBe('https://www.instagram.com/neda.design');
+    expect(card.avatarUrl).toBe(pending.changes.avatarUrl);
+    expect(card.name).toBe(PROFILE.name);
+    expect((await request(app).post(`/api/edit-requests/${pending.id}/reject`).set(auth())).status).toBe(409);
+  });
+
+  it('rejects invalid values, empty changes, and a rejected request changes nothing', async () => {
+    const token = await setup();
+    expect((await request(app).post('/api/self-edit').set('X-Edit-Token', token).send({ email: 'not-an-email' })).status).toBe(400);
+    expect((await request(app).post('/api/self-edit').set('X-Edit-Token', token).send({ whatsapp: '123' })).status).toBe(400);
+    const current = (await request(app).get('/api/self-edit').set('X-Edit-Token', token)).body.card.values;
+    expect((await request(app).post('/api/self-edit').set('X-Edit-Token', token).send({ email: current.email })).status).toBe(400);
+    // The same number written differently is not a change.
+    const spaced = current.whatsapp.replace(/^(\d{4})(\d{3})(\d{4})$/, '$1 $2 $3');
+    expect((await request(app).post('/api/self-edit').set('X-Edit-Token', token).send({ whatsapp: spaced })).status).toBe(400);
+
+    // A newer request replaces the one still waiting.
+    await request(app).post('/api/self-edit').set('X-Edit-Token', token).send({ email: 'first@royaco.com' });
+    const second = await request(app).post('/api/self-edit').set('X-Edit-Token', token).send({ email: 'second@royaco.com' });
+    const waiting = (await request(app).get('/api/edit-requests').set(auth())).body.requests.filter(
+      (r: any) => r.profileId === 'neda' && r.status === 'pending'
+    );
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0].changes.email).toBe('second@royaco.com');
+
+    await request(app).post(`/api/edit-requests/${second.body.card.pending.id}/reject`).set(auth());
+    expect((await request(app).get('/api/profiles/neda')).body.profile.email).toBe(current.email);
+  });
+
+  it('a new link replaces the old one, and links can be revoked', async () => {
+    const first = await setup();
+    const second = await setup();
+    expect((await request(app).get('/api/self-edit').set('X-Edit-Token', first)).status).toBe(404);
+    expect((await request(app).get('/api/self-edit').set('X-Edit-Token', second)).status).toBe(200);
+    await request(app).delete('/api/profiles/neda/edit-link').set(auth());
+    expect((await request(app).get('/api/self-edit').set('X-Edit-Token', second)).status).toBe(404);
+  });
+
+  it('an empty Instagram goes back to the company page', async () => {
+    const token = await setup();
+    const sent = await request(app).post('/api/self-edit').set('X-Edit-Token', token).send({ instagram: '' });
+    await request(app).post(`/api/edit-requests/${sent.body.card.pending.id}/approve`).set(auth());
+    const card = (await request(app).get('/api/profiles/neda')).body.profile;
+    const org = (await request(app).get('/api/organization').set(auth())).body.organization;
+    expect(card.instagramUrl).toBe(org.instagramUrl);
+  });
+});

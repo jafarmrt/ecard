@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Search, Pencil, Link2, QrCode, ExternalLink, Archive, RotateCcw, Trash2, User, Eye } from 'lucide-react';
-import { Branch, EmployeeProfile } from '../types';
+import { Plus, Search, Pencil, Link2, QrCode, ExternalLink, Archive, RotateCcw, Trash2, User, Eye, KeyRound } from 'lucide-react';
+import { Branch, EditLinkInfo, EditRequest, EmployeeProfile } from '../types';
 import { api } from '../services/api';
 import { copyToClipboard } from '../utils/clipboard';
 import { getDirectCardUrl } from '../utils/url';
 import { Button, Modal, StatusBadge, formatNumber, inputClass, useToast } from './ui';
+import { EditLinkModal, EditRequestsPanel } from './SelfEditAdmin';
 
 type Filter = 'current' | 'active' | 'inactive' | 'archived' | 'incomplete';
 
@@ -27,13 +28,17 @@ export const StaffTab: React.FC<{
   onEdit: (profile: EmployeeProfile | null) => void;
   onOpenQr: (profile: EmployeeProfile) => void;
   onChanged: () => Promise<void> | void;
-}> = ({ profiles, branches, selectedId, onSelect, onEdit, onOpenQr, onChanged }) => {
+  editRequests: EditRequest[];
+  editLinks: EditLinkInfo[];
+}> = ({ profiles, branches, selectedId, onSelect, onEdit, onOpenQr, onChanged, editRequests, editLinks }) => {
   const toast = useToast();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('current');
   const [archiveTarget, setArchiveTarget] = useState<EmployeeProfile | null>(null);
   const [successorId, setSuccessorId] = useState('');
   const [busy, setBusy] = useState(false);
+  const [linkTarget, setLinkTarget] = useState<EmployeeProfile | null>(null);
+  const waitingFor = useMemo(() => new Set(editRequests.filter((r) => r.status === 'pending').map((r) => r.profileId)), [editRequests]);
 
   const counts = useMemo(
     () => ({
@@ -112,6 +117,7 @@ export const StaffTab: React.FC<{
 
   return (
     <div className="space-y-3">
+      <EditRequestsPanel requests={editRequests} onDecided={onChanged} />
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="w-4 h-4 text-stone-400 absolute start-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
@@ -189,6 +195,7 @@ export const StaffTab: React.FC<{
                       {status !== 'archived' && missingFields(p).length > 0 && (
                         <span className="block text-xs text-amber-800">بدون {missingFields(p).join('، ')}</span>
                       )}
+                      {waitingFor.has(p.id) && <span className="block text-xs font-bold text-amber-800">تغییرات فرستاده، منتظر تأیید شما</span>}
                       {status === 'archived' && (
                         <span className="block text-xs text-stone-500">
                           {successor ? `لینک به کارت ${successor.name} می‌رود` : 'لینک صفحه شرکت را نشان می‌دهد'}
@@ -215,6 +222,10 @@ export const StaffTab: React.FC<{
                       <Button size="sm" onClick={() => onOpenQr(p)}>
                         <QrCode className="w-3.5 h-3.5" aria-hidden="true" />
                         QR و NFC
+                      </Button>
+                      <Button size="sm" onClick={() => setLinkTarget(p)}>
+                        <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
+                        لینک ویرایش همکار
                       </Button>
                       <a
                         href={getDirectCardUrl(p)}
@@ -255,6 +266,14 @@ export const StaffTab: React.FC<{
           })}
         </ul>
       )}
+
+      <EditLinkModal
+        key={linkTarget?.id || 'none'}
+        profile={linkTarget}
+        link={editLinks.find((l) => l.profileId === linkTarget?.id)}
+        onClose={() => setLinkTarget(null)}
+        onChanged={onChanged}
+      />
 
       <Modal
         open={!!archiveTarget}

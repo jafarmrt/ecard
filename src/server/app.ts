@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import rateLimit from 'express-rate-limit';
-import { db, getDataDir, toPublicProfile, tehranDay, ANALYTICS_EVENTS, AnalyticsEvent } from './db.ts';
+import { db, getDataDir, toPublicProfile, tehranDay, selfEditValues, ANALYTICS_EVENTS, AnalyticsEvent } from './db.ts';
 import {
   decodeImageDataUrl,
   ensureOgImage,
@@ -13,11 +13,11 @@ import {
   storePdfUpload,
   vcardPhoto,
 } from './uploads.ts';
-import { ValidationError, validateLeadInput, RESERVED_SLUGS } from './validation.ts';
+import { ValidationError, validateLeadInput, validateSelfEditInput, RESERVED_SLUGS } from './validation.ts';
 import { buildVCard, vcardFileName } from '../utils/vcardBuilder.ts';
-import type { Branch, EmployeeProfile, Organization } from '../types.ts';
+import type { Branch, EmployeeProfile, Organization, SelfEditValues } from '../types.ts';
 
-export const APP_VERSION = '3.1.0';
+export const APP_VERSION = '3.2.0';
 
 export function escapeHtml(str: string): string {
   return String(str || '')
@@ -242,6 +242,8 @@ export function createApp() {
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
     if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+    // The private edit page must never be indexed.
+    if (req.path === '/edit' || req.path.startsWith('/api/self-edit')) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     next();
   });
 
@@ -252,6 +254,7 @@ export function createApp() {
   app.use('/api/upload-image', express.json({ limit: '14mb' }));
   app.use('/api/restore', express.json({ limit: '20mb' }));
   app.use('/api/profiles', express.json({ limit: '6mb' }));
+  app.use('/api/self-edit', express.json({ limit: '8mb' })); // employee photo as a data URL
   app.use(express.json({ limit: '100kb' }));
   app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 
@@ -274,6 +277,7 @@ export function createApp() {
   const analyticsLimiter = limiter(60 * 1000, 120);
   const leadLimiter = limiter(10 * 60 * 1000, 10, 'تعداد درخواست‌ها زیاد است. لطفاً چند دقیقه بعد دوباره تلاش کنید.');
   const ogLimiter = limiter(60 * 1000, 60);
+  const selfEditLimiter = limiter(15 * 60 * 1000, 40, 'تعداد درخواست‌ها زیاد است. لطفاً چند دقیقه بعد دوباره تلاش کنید.');
 
   // Uploaded files. SVG files from older versions are sandboxed so scripts inside them cannot run.
   const uploadsDir = getUploadsDir();
@@ -569,6 +573,7 @@ export function createApp() {
         totalProfiles: profiles.filter((p) => p.status !== 'archived').length,
         totalLeads: db.getAllLeads().length,
         newLeads: db.getAllLeads().filter((l) => (l.status || 'new') === 'new').length,
+        pendingEdits: db.countPendingEditRequests(),
         ...totals,
         totalInteractions:
           totals.totalCalls +
@@ -693,6 +698,93 @@ export function createApp() {
       console.error('[OG] preview image failed', err);
       fallback();
     }
+  });
+
+  // ---------------- Employee self edit ----------------
+  // The employee opens /edit#<secret>; the page sends the secret in a header, so it never appears in server logs.
+  const editProfile = (req: Request, res: Response): EmployeeProfile | undefined => {
+    const profile = db.profileForEditToken(req.headers['x-edit-token']);
+    if (!profile) {
+      res.status(404).json({ success: false, error: 'این لینک ویرایش معتبر نیست یا باطل شده است. لطفاً از مدیر پنل لینک تازه بگیرید.' });
+      return undefined;
+    }
+    return profile;
+  };
+
+  const selfEditView = (profile: EmployeeProfile) => ({
+    name: profile.name,
+    title: profile.title,
+    slug: profile.slug || profile.id,
+    values: selfEditValues(profile),
+    companyInstagram: db.getOrganization().instagram,
+    pending: db.pendingEditRequest(profile.id) || null,
+  });
+
+  app.get('/api/self-edit', selfEditLimiter, (req, res) => {
+    const profile = editProfile(req, res);
+    if (!profile) return;
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ success: true, card: selfEditView(profile) });
+  });
+
+  app.post('/api/self-edit', selfEditLimiter, async (req, res) => {
+    try {
+      const profile = editProfile(req, res);
+      if (!profile) return;
+      const values: SelfEditValues = validateSelfEditInput(req.body || {});
+      const photo = req.body?.photo;
+      if (typeof photo === 'string' && photo) {
+        values.avatarUrl = await storeImageUpload(decodeImageDataUrl(photo), 'avatar', profile.slug || profile.id);
+      } else if (req.body?.keepPendingPhoto === true) {
+        // Sending the form again should not drop a photo that is still waiting for approval.
+        const waiting = db.pendingEditRequest(profile.id)?.changes.avatarUrl;
+        if (waiting) values.avatarUrl = waiting;
+      }
+      const request = db.submitEditRequest(profile.id, values, maskedIp(req));
+      audit(req, 'request', 'self-edit', profile.id, `${profile.name}: ${Object.keys(request.changes).join('، ')}`);
+      res.status(201).json({
+        success: true,
+        card: selfEditView(db.getProfileById(profile.id)!),
+        message: 'تغییرات شما ثبت شد و بعد از تأیید مدیر روی کارت نمایش داده می‌شود.',
+      });
+    } catch (err) {
+      sendError(res, err, 'ثبت تغییرات انجام نشد.');
+    }
+  });
+
+  app.get('/api/edit-requests', requireAdminAuth, (req, res) => {
+    res.json({ success: true, requests: db.getEditRequests(), links: db.getEditLinks() });
+  });
+
+  for (const [action, approve] of [
+    ['approve', true],
+    ['reject', false],
+  ] as const) {
+    app.post(`/api/edit-requests/:id/${action}`, requireAdminAuth, (req, res) => {
+      try {
+        const result = db.decideEditRequest(req.params.id, approve);
+        audit(req, action, 'self-edit', result.request.profileId, `${result.request.profileName}: ${Object.keys(result.request.changes).join('، ')}`);
+        res.json({ success: true, ...result });
+      } catch (err) {
+        sendError(res, err, 'بررسی درخواست تغییر انجام نشد.');
+      }
+    });
+  }
+
+  app.post('/api/profiles/:id/edit-link', requireAdminAuth, (req, res) => {
+    try {
+      const { token, link } = db.createEditLink(req.params.id);
+      audit(req, 'create', 'edit-link', link.profileId, db.getProfileById(link.profileId)?.name);
+      res.status(201).json({ success: true, url: `${resolveRequestOrigin(req)}/edit#${token}`, link });
+    } catch (err) {
+      sendError(res, err, 'ساخت لینک ویرایش انجام نشد.');
+    }
+  });
+
+  app.delete('/api/profiles/:id/edit-link', requireAdminAuth, (req, res) => {
+    const removed = db.revokeEditLink(req.params.id);
+    if (removed) audit(req, 'revoke', 'edit-link', req.params.id, db.getProfileById(req.params.id)?.name);
+    res.json({ success: true, removed });
   });
 
   // ---------------- Backup ----------------

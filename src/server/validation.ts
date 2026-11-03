@@ -33,6 +33,7 @@ export const RESERVED_SLUGS = new Set([
   'favicon',
   'index',
   'node_modules',
+  'edit',
 ]);
 
 /** Lower-case a slug and strip every character outside a-z, 0-9, dash and underscore. */
@@ -111,3 +112,49 @@ export function validateLeadInput(body: any): LeadInput {
 }
 
 export const MIN_PASSWORD_LENGTH = 10;
+
+export const SELF_EDIT_TEXT_FIELDS = ['whatsapp', 'instagram', 'email'] as const;
+
+/** Instagram handle from "@name", "name" or an instagram.com link; '' when blank. */
+export function normalizeInstagramHandle(input: unknown): string {
+  let value = toEnglishDigits(String(input ?? '')).trim();
+  if (!value) return '';
+  const fromUrl = value.match(/^(?:https?:\/\/)?(?:www\.)?instagram\.com\/([^/?#]+)/i);
+  if (fromUrl) value = fromUrl[1];
+  value = value.replace(/^@/, '').replace(/\/+$/, '');
+  if (!/^[a-zA-Z0-9._]{1,30}$/.test(value)) {
+    throw new ValidationError('آیدی اینستاگرام معتبر نیست. نمونه صحیح: royaco یا ‎@royaco');
+  }
+  return value;
+}
+
+/** WhatsApp number: Iranian mobiles become 09xxxxxxxxx, other countries +<digits>; '' when blank. */
+export function normalizeWhatsapp(input: unknown): string {
+  const raw = toEnglishDigits(String(input ?? '')).trim();
+  if (!raw) return '';
+  const iran = normalizeIranMobile(raw);
+  if (iran) return iran;
+  const compact = raw.replace(/[\s\-().]/g, '');
+  const match = compact.match(/^(?:\+|00)([1-9]\d{7,14})$/);
+  if (!match) throw new ValidationError('شماره واتساپ معتبر نیست. نمونه صحیح: 09121234567');
+  return `+${match[1]}`;
+}
+
+export function normalizeEmail(input: unknown): string {
+  const value = String(input ?? '').trim().toLowerCase();
+  if (!value) return '';
+  if (value.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) throw new ValidationError('ایمیل معتبر نیست.');
+  return value;
+}
+
+/**
+ * Text fields an employee sent from their private edit link. Only fields that
+ * are present are returned; unknown fields are ignored.
+ */
+export function validateSelfEditInput(body: any): { whatsapp?: string; instagram?: string; email?: string } {
+  const out: { whatsapp?: string; instagram?: string; email?: string } = {};
+  if (body?.whatsapp !== undefined) out.whatsapp = normalizeWhatsapp(body.whatsapp);
+  if (body?.instagram !== undefined) out.instagram = normalizeInstagramHandle(body.instagram);
+  if (body?.email !== undefined) out.email = normalizeEmail(body.email);
+  return out;
+}

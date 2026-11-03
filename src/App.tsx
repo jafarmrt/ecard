@@ -12,6 +12,7 @@ import { resolveRoute } from './utils/url';
 
 // The admin panel is a separate chunk: visitors opening a card never download it.
 const AdminApp = lazy(() => import('./admin/AdminApp'));
+const SelfEditPage = lazy(() => import('./pages/SelfEditPage'));
 
 export default function App() {
   const route = resolveRoute();
@@ -26,6 +27,15 @@ export default function App() {
         }
       >
         <AdminApp />
+        <OfflineIndicator />
+      </Suspense>
+    );
+  }
+
+  if (route.kind === 'self-edit') {
+    return (
+      <Suspense fallback={<div className="min-h-dvh bg-stone-100" aria-busy="true" />}>
+        <SelfEditPage />
         <OfflineIndicator />
       </Suspense>
     );

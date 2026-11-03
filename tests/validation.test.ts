@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeIranMobile, normalizeSlug, validateLeadInput, ValidationError } from '../src/server/validation';
+import {
+  normalizeIranMobile,
+  normalizeSlug,
+  validateLeadInput,
+  validateSelfEditInput,
+  ValidationError,
+} from '../src/server/validation';
 import { whatsappNumber, telHref } from '../src/utils/phone';
 import { resolveCatalogUrl } from '../src/utils/catalog';
 
@@ -54,5 +60,25 @@ describe('slugs and catalog links', () => {
     expect(resolveCatalogUrl({ catalogPdfUrl: '', catalogUrl: 'کاتالوگ جامع محصولات رویا' })).toBe('/roya-catalog.pdf');
     expect(resolveCatalogUrl({ catalogPdfUrl: '', catalogUrl: 'catalog.royaco.com' })).toBe('https://catalog.royaco.com');
     expect(resolveCatalogUrl({ catalogPdfUrl: '/uploads/c.pdf', catalogUrl: 'x' })).toBe('/uploads/c.pdf');
+  });
+});
+
+describe('validateSelfEditInput', () => {
+  it('normalises Instagram, WhatsApp and email', () => {
+    expect(validateSelfEditInput({ instagram: '@Roya.Design', whatsapp: '+98 912 123 4567', email: ' A@RoyaCo.com ' })).toEqual({
+      instagram: 'Roya.Design',
+      whatsapp: '09121234567',
+      email: 'a@royaco.com',
+    });
+    expect(validateSelfEditInput({ instagram: 'https://instagram.com/roya_co/?hl=fa' }).instagram).toBe('roya_co');
+    expect(validateSelfEditInput({ whatsapp: '0044 7700 900123' }).whatsapp).toBe('+447700900123');
+  });
+
+  it('keeps blank values (clear the field) and ignores fields it does not know', () => {
+    expect(validateSelfEditInput({ instagram: '', name: 'x', mobile: '0912' })).toEqual({ instagram: '' });
+  });
+
+  it.each([{ instagram: 'bad handle!' }, { whatsapp: '12345' }, { email: 'no-at-sign' }])('rejects %o', (body) => {
+    expect(() => validateSelfEditInput(body)).toThrow(ValidationError);
   });
 });
