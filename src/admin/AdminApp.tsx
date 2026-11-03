@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { RoyaLogo } from '../components/RoyaLogo';
 import { DigitalCard } from '../components/DigitalCard';
 import { NfcModal } from '../components/NfcModal';
+import { setConfiguredPublicOrigin } from '../utils/url';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { ToastProvider, useToast } from './ui';
 import { LoginScreen } from './LoginScreen';
@@ -45,6 +46,7 @@ const Workspace: React.FC<{ onLoggedOut: () => void }> = ({ onLoggedOut }) => {
 
   const loadAll = useCallback(async () => {
     const [list, org, br] = await Promise.all([api.getProfiles(), api.getOrganization(), api.getBranches()]);
+    if (org.success) setConfiguredPublicOrigin(org.publicOrigin);
     setProfiles(list);
     if (org.success && org.organization) setOrganization(org.organization);
     if (br.success && br.branches) setBranches(br.branches);
