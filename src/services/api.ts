@@ -1,4 +1,4 @@
-import type { AuditEntry, Branch, CustomerLead, EmployeeProfile, Organization } from '../types';
+import type { AuditEntry, Branch, CustomerLead, EditLinkInfo, EditRequest, EmployeeProfile, Organization, SelfEditValues } from '../types';
 
 /**
  * Admin sessions use an HttpOnly cookie set by the server, so no secret is
@@ -76,6 +76,16 @@ export type PublicCardResponse =
   | { kind: 'unavailable'; state: 'inactive' | 'archived'; name: string; company: Partial<EmployeeProfile> & { company?: string } }
   | { kind: 'not-found' }
   | { kind: 'offline'; profile: EmployeeProfile | null };
+
+/** What an employee sees on their private edit page. */
+export interface SelfEditCard {
+  name: string;
+  title: string;
+  slug: string;
+  values: SelfEditValues;
+  companyInstagram: string;
+  pending: EditRequest | null;
+}
 
 export interface SystemHealth {
   version: string;
@@ -459,6 +469,52 @@ export const api = {
 
   async deleteLead(id: string): Promise<{ success: boolean; error?: string }> {
     const data = await call(`/api/leads/${encodeURIComponent(id)}`, { method: 'DELETE' }, 'خطا در حذف رکورد مشتری');
+    return { success: data.ok, error: data.error };
+  },
+
+  // ---------------- Employee self edit ----------------
+  async getSelfEdit(token: string): Promise<{ success: boolean; card?: SelfEditCard; status: number; error?: string }> {
+    const data = await call<{ card?: SelfEditCard }>('/api/self-edit', { headers: { 'X-Edit-Token': token } }, 'خطا در ارتباط با سرور');
+    return { success: data.ok, card: data.card, status: data.status, error: data.error };
+  },
+
+  async submitSelfEdit(
+    token: string,
+    values: { whatsapp?: string; instagram?: string; email?: string; photo?: string; keepPendingPhoto?: boolean }
+  ): Promise<{ success: boolean; card?: SelfEditCard; message?: string; error?: string }> {
+    const data = await call<{ card?: SelfEditCard; message?: string }>(
+      '/api/self-edit',
+      { method: 'POST', json: values, headers: { 'X-Edit-Token': token } },
+      'ارسال تغییرات انجام نشد. اتصال اینترنت را بررسی کنید.'
+    );
+    return { success: data.ok, card: data.card, message: data.message, error: data.error };
+  },
+
+  async getEditRequests(): Promise<{ success: boolean; requests: EditRequest[]; links: EditLinkInfo[]; error?: string }> {
+    const data = await call<{ requests?: EditRequest[]; links?: EditLinkInfo[] }>('/api/edit-requests', {}, 'خطا در دریافت درخواست‌های تغییر');
+    return { success: data.ok, requests: data.requests || [], links: data.links || [], error: data.error };
+  },
+
+  async decideEditRequest(id: string, approve: boolean): Promise<{ success: boolean; profile?: EmployeeProfile; error?: string }> {
+    const data = await call<{ profile?: EmployeeProfile }>(
+      `/api/edit-requests/${encodeURIComponent(id)}/${approve ? 'approve' : 'reject'}`,
+      { method: 'POST' },
+      'خطا در ثبت نتیجه بررسی'
+    );
+    return { success: data.ok, profile: data.profile, error: data.error };
+  },
+
+  async createEditLink(profileId: string): Promise<{ success: boolean; url?: string; link?: EditLinkInfo; error?: string }> {
+    const data = await call<{ url?: string; link?: EditLinkInfo }>(
+      `/api/profiles/${encodeURIComponent(profileId)}/edit-link`,
+      { method: 'POST' },
+      'ساخت لینک ویرایش انجام نشد'
+    );
+    return { success: data.ok, url: data.url, link: data.link, error: data.error };
+  },
+
+  async revokeEditLink(profileId: string): Promise<{ success: boolean; error?: string }> {
+    const data = await call(`/api/profiles/${encodeURIComponent(profileId)}/edit-link`, { method: 'DELETE' }, 'باطل کردن لینک انجام نشد');
     return { success: data.ok, error: data.error };
   },
 

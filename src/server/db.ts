@@ -20,6 +20,10 @@ import type {
   AuditEntry,
   Branch,
   CustomerLead,
+  EditLinkInfo,
+  EditRequest,
+  SelfEditField,
+  SelfEditValues,
   LeadStatus,
   EmployeeAnalytics,
   EmployeeProfile,
@@ -33,7 +37,9 @@ import {
   MIN_PASSWORD_LENGTH,
   RESERVED_SLUGS,
   isValidIdentifier,
+  normalizeIranMobile,
   normalizeSlug,
+  toEnglishDigits,
 } from './validation.ts';
 import { SqliteDb, backupTo, getDbPath, openDatabase, schemaVersion, transaction } from './sqlite.ts';
 import { hashPassword, legacyPbkdf2Hash, needsRehash, safeEqualString, verifyPasswordHash } from './passwords.ts';
@@ -1034,6 +1040,47 @@ function verifySignedToken(token: string): boolean {
 // Public API
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Self edit (employees change a few fields through a private link)
+// ---------------------------------------------------------------------------
+
+export const SELF_EDIT_FIELDS: SelfEditField[] = ['avatarUrl', 'whatsapp', 'instagram', 'email'];
+
+const hashEditToken = (token: string) => crypto.createHash('sha256').update(String(token)).digest('hex');
+
+/** The card's own values for the fields an employee may change (company Instagram is not theirs). */
+export function selfEditValues(profile: EmployeeProfile): SelfEditValues {
+  return {
+    avatarUrl: profile.avatarUrl || '',
+    whatsapp: profile.whatsapp || '',
+    instagram: profile.overrides?.includes('instagram') ? profile.instagram || '' : '',
+    email: profile.email || '',
+  };
+}
+
+/** "0912 075 3287" and "09120753287" are the same number; "A@x.com" and "a@x.com" the same email. */
+function sameSelfEditValue(field: SelfEditField, a: string, b: string): boolean {
+  if (field === 'whatsapp') {
+    const key = (v: string) => normalizeIranMobile(v) || toEnglishDigits(v).replace(/[^\d]/g, '');
+    return key(a) === key(b);
+  }
+  if (field === 'email' || field === 'instagram') return a.trim().toLowerCase() === b.trim().toLowerCase();
+  return a === b;
+}
+
+function toEditRequest(row: any, profile?: EmployeeProfile): EditRequest {
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    profileName: profile?.name || '',
+    changes: JSON.parse(row.changes || '{}'),
+    current: profile ? selfEditValues(profile) : {},
+    status: row.status,
+    createdAt: row.created_at,
+    decidedAt: row.decided_at || undefined,
+  };
+}
+
 export type PublicCardResult =
   | { kind: 'ok'; profile: EmployeeProfile; canonicalSlug?: string; replacedFrom?: { id: string; name: string } }
   | { kind: 'unavailable'; state: 'inactive' | 'archived'; name: string; organization: Organization; branch?: Branch }
@@ -1544,6 +1591,124 @@ export const db = {
     conn().prepare('INSERT OR IGNORE INTO revoked_tokens (token, expires_at) VALUES (?, ?)').run(token, expires);
   },
 
+  // ----- self edit -----
+  /** Creates (or replaces) the employee's private edit link. Returns the secret once; only its hash is stored. */
+  createEditLink(profileId: string): { token: string; link: EditLinkInfo } {
+    const row = rowById(profileId);
+    if (!row || row.status === 'archived') throw new ValidationError('کارت فعالی با این شناسه پیدا نشد.', 404);
+    const token = crypto.randomBytes(24).toString('base64url');
+    const stamp = now();
+    conn()
+      .prepare(
+        `INSERT INTO edit_links (profile_id, token_hash, created_at, last_used_at) VALUES (?, ?, ?, NULL)
+         ON CONFLICT(profile_id) DO UPDATE SET token_hash = excluded.token_hash, created_at = excluded.created_at, last_used_at = NULL`
+      )
+      .run(row.id, hashEditToken(token), stamp);
+    return { token, link: { profileId: row.id, createdAt: stamp } };
+  },
+
+  revokeEditLink(profileId: string): boolean {
+    return Number(conn().prepare('DELETE FROM edit_links WHERE profile_id = ?').run(profileId).changes) > 0;
+  },
+
+  getEditLinks(): EditLinkInfo[] {
+    return (conn().prepare('SELECT profile_id, created_at, last_used_at FROM edit_links').all() as any[]).map((r) => ({
+      profileId: r.profile_id,
+      createdAt: r.created_at,
+      lastUsedAt: r.last_used_at || undefined,
+    }));
+  },
+
+  /** The card an edit link belongs to (never an archived one). Marks the link as used. */
+  profileForEditToken(token: unknown): EmployeeProfile | undefined {
+    if (typeof token !== 'string' || token.length < 20 || token.length > 100) return undefined;
+    const link = conn().prepare('SELECT profile_id FROM edit_links WHERE token_hash = ?').get(hashEditToken(token)) as
+      | { profile_id: string }
+      | undefined;
+    if (!link) return undefined;
+    const profile = this.getProfileById(link.profile_id);
+    if (!profile || profile.status === 'archived') return undefined;
+    conn().prepare('UPDATE edit_links SET last_used_at = ? WHERE profile_id = ?').run(now(), link.profile_id);
+    return profile;
+  },
+
+  pendingEditRequest(profileId: string): EditRequest | undefined {
+    const row = conn()
+      .prepare("SELECT * FROM edit_requests WHERE profile_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1")
+      .get(profileId);
+    return row ? toEditRequest(row, this.getProfileById(profileId)) : undefined;
+  },
+
+  /**
+   * Stores what an employee wants to change. Only fields that differ from the
+   * card are kept; a newer request replaces the one still waiting for approval.
+   */
+  submitEditRequest(profileId: string, values: SelfEditValues, ip?: string): EditRequest {
+    return transaction(conn(), () => {
+      const profile = this.getProfileById(profileId);
+      if (!profile) throw new ValidationError('کارت پیدا نشد.', 404);
+      const current = selfEditValues(profile);
+      const changes: SelfEditValues = {};
+      for (const field of SELF_EDIT_FIELDS) {
+        const value = values[field];
+        if (value !== undefined && !sameSelfEditValue(field, value, current[field] || '')) changes[field] = value;
+      }
+      if (Object.keys(changes).length === 0) throw new ValidationError('تغییری نسبت به اطلاعات فعلی کارت وارد نشده است.');
+      conn().prepare("DELETE FROM edit_requests WHERE profile_id = ? AND status = 'pending'").run(profileId);
+      const id = crypto.randomUUID();
+      conn()
+        .prepare('INSERT INTO edit_requests (id, profile_id, changes, status, created_at, ip) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(id, profileId, JSON.stringify(changes), 'pending', now(), ip || null);
+      return toEditRequest(conn().prepare('SELECT * FROM edit_requests WHERE id = ?').get(id), profile);
+    });
+  },
+
+  /** Waiting requests first (oldest first), then the 30 most recent decisions. */
+  getEditRequests(): EditRequest[] {
+    const ctx = loadContext();
+    const profiles = new Map(allRows().map((r) => [r.id, resolveRow(r, ctx)]));
+    const pending = conn().prepare("SELECT * FROM edit_requests WHERE status = 'pending' ORDER BY created_at").all() as any[];
+    const decided = conn()
+      .prepare("SELECT * FROM edit_requests WHERE status != 'pending' ORDER BY decided_at DESC LIMIT 30")
+      .all() as any[];
+    return [...pending, ...decided].map((row) => toEditRequest(row, profiles.get(row.profile_id)));
+  },
+
+  countPendingEditRequests(): number {
+    return (conn().prepare("SELECT COUNT(*) AS n FROM edit_requests WHERE status = 'pending'").get() as { n: number }).n;
+  },
+
+  /** Approve (the card changes now) or reject an employee's request. */
+  decideEditRequest(id: string, approve: boolean): { request: EditRequest; profile?: EmployeeProfile } {
+    return transaction(conn(), () => {
+      const row = conn().prepare('SELECT * FROM edit_requests WHERE id = ?').get(id) as any;
+      if (!row) throw new ValidationError('درخواست تغییر پیدا نشد.', 404);
+      if (row.status !== 'pending') throw new ValidationError('این درخواست قبلاً بررسی شده است.', 409);
+      let profile = this.getProfileById(row.profile_id);
+      if (!profile) throw new ValidationError('کارت این درخواست دیگر وجود ندارد.', 404);
+      if (approve) {
+        const changes = JSON.parse(row.changes || '{}') as SelfEditValues;
+        const next: EmployeeProfile = { ...profile };
+        if (changes.avatarUrl !== undefined) next.avatarUrl = changes.avatarUrl || undefined;
+        if (changes.whatsapp !== undefined) next.whatsapp = changes.whatsapp;
+        if (changes.email !== undefined) next.email = changes.email;
+        if (changes.instagram !== undefined) {
+          // Blank means "show the company's Instagram again".
+          next.instagram = changes.instagram;
+          next.instagramUrl = changes.instagram ? instagramToUrl(changes.instagram) : '';
+        }
+        profile = this.saveProfile(next, 'update');
+      }
+      conn()
+        .prepare('UPDATE edit_requests SET status = ?, decided_at = ? WHERE id = ?')
+        .run(approve ? 'approved' : 'rejected', now(), id);
+      return {
+        request: toEditRequest(conn().prepare('SELECT * FROM edit_requests WHERE id = ?').get(id), profile),
+        profile: approve ? profile : undefined,
+      };
+    });
+  },
+
   // ----- audit log -----
   audit(action: string, entity: string, entityId?: string | null, summary?: string, ip?: string) {
     try {
@@ -1696,6 +1861,10 @@ export const db = {
     const org = readOrganization();
     Object.values(org).forEach(add);
     for (const row of allRows()) Object.values(JSON.parse(row.data)).forEach(add);
+    // A photo an employee sent stays until the admin decides.
+    for (const row of conn().prepare("SELECT changes FROM edit_requests WHERE status = 'pending'").all() as { changes: string }[]) {
+      add(JSON.parse(row.changes || '{}').avatarUrl);
+    }
     return refs;
   },
 

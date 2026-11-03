@@ -18,6 +18,10 @@ const ACTION_LABEL: Record<string, string> = {
   'change-password': 'تغییر رمز',
   snapshot: 'پشتیبان سرور',
   cleanup: 'پاکسازی فایل‌ها',
+  request: 'ارسال',
+  approve: 'تأیید',
+  reject: 'رد',
+  revoke: 'باطل کردن',
 };
 
 const ENTITY_LABEL: Record<string, string> = {
@@ -29,6 +33,8 @@ const ENTITY_LABEL: Record<string, string> = {
   catalog: 'کاتالوگ',
   backup: 'پشتیبان',
   uploads: 'فایل‌ها',
+  'self-edit': 'تغییر از طرف همکار',
+  'edit-link': 'لینک ویرایش همکار',
 };
 
 const MIN_PASSWORD = 10;

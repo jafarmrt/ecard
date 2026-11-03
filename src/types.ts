@@ -38,6 +38,30 @@ export interface CustomerLead {
 
 export type LeadStatus = 'new' | 'contacted' | 'closed';
 
+/** The only card fields an employee may change through their private edit link. */
+export type SelfEditField = 'avatarUrl' | 'whatsapp' | 'instagram' | 'email';
+export type SelfEditValues = Partial<Record<SelfEditField, string>>;
+
+/** A change an employee sent; it reaches the card only after an admin approves it. */
+export interface EditRequest {
+  id: string;
+  profileId: string;
+  profileName: string;
+  changes: SelfEditValues;
+  /** The card's own values right now, to compare with `changes`. */
+  current: SelfEditValues;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  decidedAt?: string;
+}
+
+/** An employee's private edit link (the link itself is shown only once, when created). */
+export interface EditLinkInfo {
+  profileId: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
 export type ProfileStatus = 'active' | 'inactive' | 'archived';
 
 export interface MapLocation {
