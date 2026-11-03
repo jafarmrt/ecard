@@ -658,3 +658,36 @@ describe('phase 5: follow-up, privacy and reports', () => {
     expect(bad.body.profile.physicalCard).toBeUndefined();
   });
 });
+
+describe('phase 6: working hours and project photos', () => {
+  it('shows the branch working hours on its cards', async () => {
+    const branch = (await request(app).get('/api/branches').set(auth())).body.branches[0];
+    const saved = await request(app)
+      .put(`/api/branches/${branch.id}`)
+      .set(auth())
+      .send({ ...branch, workingHours: 'شنبه تا چهارشنبه ۹ تا ۱۸' });
+    expect(saved.status).toBe(200);
+    const card = (await request(app).get('/api/profiles').set(auth())).body.profiles.find((p: any) => p.branchId === branch.id && p.status === 'active');
+    const pub = (await request(app).get(`/api/profiles/${card.id}`)).body.profile;
+    expect(pub.workingHours).toBe('شنبه تا چهارشنبه ۹ تا ۱۸');
+  });
+
+  it('keeps only uploaded photos in the gallery and shows them on every card', async () => {
+    const upload = await request(app).post('/api/upload-image?type=gallery').set(auth()).set('Content-Type', 'image/png').send(Buffer.from(PNG_1PX.split(',')[1], 'base64'));
+    expect(upload.status).toBe(200);
+    const url = upload.body.url;
+    const res = await request(app)
+      .put('/api/organization')
+      .set(auth())
+      .send({ gallery: [url, 'https://evil.example/x.jpg', 'javascript:alert(1)'] });
+    expect(res.body.organization.gallery).toEqual([url]);
+    expect((await request(app).get('/api/profiles/sara')).body.profile.gallery).toEqual([url]);
+    expect(db.referencedUploads().has(url)).toBe(true);
+
+    // Saving a card does not copy the gallery into it.
+    const card = (await request(app).get('/api/profiles').set(auth())).body.profiles.find((p: any) => p.id === 'sara');
+    await request(app).put('/api/profiles/sara').set(auth()).send(card);
+    await request(app).put('/api/organization').set(auth()).send({ gallery: [] });
+    expect((await request(app).get('/api/profiles/sara')).body.profile.gallery).toEqual([]);
+  });
+});

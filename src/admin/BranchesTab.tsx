@@ -12,6 +12,7 @@ interface BranchForm {
   address: string;
   postalCode: string;
   landline: string;
+  workingHours: string;
   lat: string;
   lng: string;
   isDefault: boolean;
@@ -23,6 +24,7 @@ const toForm = (b?: Branch): BranchForm => ({
   address: b?.address || '',
   postalCode: b?.postalCode || '',
   landline: b?.landline || '',
+  workingHours: b?.workingHours || '',
   lat: b?.mapLocation?.lat != null ? String(b.mapLocation.lat) : '',
   lng: b?.mapLocation?.lng != null ? String(b.mapLocation.lng) : '',
   isDefault: !!b?.isDefault,
@@ -71,6 +73,7 @@ export const BranchesTab: React.FC<{
         address: editing.address.trim(),
         postalCode: toEnglishDigits(editing.postalCode).trim(),
         landline: editing.landline.trim(),
+        workingHours: editing.workingHours.trim(),
         isDefault: editing.isDefault,
         mapLocation: { lat, lng, title: editing.name.trim(), ...buildMapUrls(lat, lng) },
       },
@@ -125,6 +128,7 @@ export const BranchesTab: React.FC<{
                     {toPersianDigits(b.landline)}
                   </p>
                 )}
+                {b.workingHours && <p className="text-[12.5px] text-stone-600 mt-0.5">ساعت کاری: {toPersianDigits(b.workingHours)}</p>}
                 <p className="text-xs text-stone-500 mt-1">{formatNumber(cardsIn(b.id))} کارت</p>
               </div>
               <MapPin className="w-5 h-5 text-[#D0192A] shrink-0" aria-hidden="true" />
@@ -180,6 +184,16 @@ export const BranchesTab: React.FC<{
             </Field>
             <Field label="آدرس" htmlFor="br-address">
               <textarea id="br-address" rows={2} className={inputClass} value={editing.address} onChange={(e) => set('address', e.target.value)} />
+            </Field>
+            <Field label="ساعت کاری" htmlFor="br-hours" hint="روی کارت همکاران این شعبه نشان داده می‌شود. خالی بماند، نمایش داده نمی‌شود.">
+              <input
+                id="br-hours"
+                className={inputClass}
+                maxLength={160}
+                placeholder="شنبه تا چهارشنبه ۹ تا ۱۸، پنجشنبه ۹ تا ۱۳"
+                value={editing.workingHours}
+                onChange={(e) => set('workingHours', e.target.value)}
+              />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="تلفن ثابت" htmlFor="br-landline">

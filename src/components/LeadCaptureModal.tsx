@@ -42,6 +42,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
   const [consent, setConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [queued, setQueued] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [honeypot, setHoneypot] = useState('');
   const [showMore, setShowMore] = useState(false);
@@ -93,6 +94,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
       });
 
       if (res.success) {
+        setQueued(Boolean(res.queued));
         setSubmitted(true);
       } else {
         setErrorMsg(res.error || 'خطا در ثبت اطلاعات تماس');
@@ -106,6 +108,7 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
 
   const handleResetAndClose = () => {
     setSubmitted(false);
+    setQueued(false);
     setCustomerName('');
     setCustomerMobile('');
     setCustomerCompany('');
@@ -161,12 +164,19 @@ export const LeadCaptureModal: React.FC<LeadCaptureModalProps> = ({
 
               <div>
                 <h4 className="text-base font-black text-stone-800">
-                  مشخصات شما با موفقیت ثبت شد!
+                  {queued ? 'درخواست شما روی همین گوشی ذخیره شد' : 'مشخصات شما با موفقیت ثبت شد!'}
                 </h4>
-                <p className="text-[13px] text-stone-600 mt-1.5 leading-relaxed">
-                  درخواست شما برای <span className="font-bold text-stone-800">{profile.name}</span> ارسال شد.
-                  کارشناس ما حداکثر تا ۲۴ ساعت کاری با شما تماس می‌گیرد.
-                </p>
+                {queued ? (
+                  <p className="text-[13px] text-stone-600 mt-1.5 leading-relaxed">
+                    الان اینترنت وصل نیست. به‌محض وصل شدن، درخواست شما برای <span className="font-bold text-stone-800">{profile.name}</span> خودکار
+                    فرستاده می‌شود؛ کافی است این صفحه باز بماند یا بعداً کارت را دوباره باز کنید.
+                  </p>
+                ) : (
+                  <p className="text-[13px] text-stone-600 mt-1.5 leading-relaxed">
+                    درخواست شما برای <span className="font-bold text-stone-800">{profile.name}</span> ارسال شد.
+                    کارشناس ما حداکثر تا ۲۴ ساعت کاری با شما تماس می‌گیرد.
+                  </p>
+                )}
               </div>
 
               <div className="pt-2 space-y-2.5">

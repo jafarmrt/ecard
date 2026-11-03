@@ -175,6 +175,8 @@ export const ProfileFormModal: React.FC<{
       delete (base as any)[key];
     }
     if (!profile?.overrides?.includes('mapLocation') || profile?.branchId !== form.branchId) delete (base as any).mapLocation;
+    if (!profile?.overrides?.includes('workingHours') || profile?.branchId !== form.branchId) delete (base as any).workingHours;
+    delete (base as any).gallery;
     const next = {
       ...base,
       name: form.name.trim(),

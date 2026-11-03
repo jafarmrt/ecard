@@ -91,6 +91,8 @@ export interface Organization {
   catalogUrl?: string;
   catalogPdfUrl?: string;
   layoutDirection: 'rtl' | 'ltr';
+  /** Photos of finished projects shown on every card (uploaded images, at most 12). */
+  gallery?: string[];
 }
 
 /** An office / showroom. Cards inherit address, phone and map from their branch. */
@@ -100,6 +102,8 @@ export interface Branch {
   address: string;
   postalCode?: string;
   landline?: string;
+  /** e.g. "شنبه تا چهارشنبه ۹ تا ۱۸، پنجشنبه ۹ تا ۱۳" */
+  workingHours?: string;
   mapLocation: MapLocation;
   isDefault?: boolean;
 }
@@ -138,6 +142,10 @@ export interface EmployeeProfile {
   email: string;
   address: string;
   postalCode?: string;
+  /** From the branch. */
+  workingHours?: string;
+  /** From the organisation (same for every card). */
+  gallery?: string[];
   department?: string;
   logoUrl?: string;
   avatarUrl?: string;

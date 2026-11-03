@@ -148,7 +148,7 @@ export const ORG_FIELDS = [
   'layoutDirection',
 ] as const;
 /** Fields a card inherits from its branch unless it overrides them. */
-export const BRANCH_FIELDS = ['address', 'postalCode', 'landline', 'mapLocation'] as const;
+export const BRANCH_FIELDS = ['address', 'postalCode', 'landline', 'workingHours', 'mapLocation'] as const;
 
 /** Columns that are stored outside the profile JSON. */
 const META_FIELDS = [
@@ -394,6 +394,9 @@ function normalizeOrganization(input: Partial<Organization>, base: Organization 
     catalogUrl: String(merged.catalogUrl || '').trim(),
     catalogPdfUrl: String(merged.catalogPdfUrl || '').trim(),
     layoutDirection: merged.layoutDirection === 'ltr' ? 'ltr' : 'rtl',
+    gallery: (Array.isArray(merged.gallery) ? merged.gallery : [])
+      .filter((u): u is string => typeof u === 'string' && /^\/uploads\/images\/[\w.-]+$/.test(u))
+      .slice(0, 12),
   };
 }
 
@@ -432,6 +435,7 @@ function normalizeBranch(input: Partial<Branch>, id: string): Branch {
     address: String(input.address || '').trim().slice(0, 300),
     postalCode: String(input.postalCode || '').trim().slice(0, 20),
     landline: String(input.landline || '').trim().slice(0, 40),
+    workingHours: String(input.workingHours || '').trim().slice(0, 160),
     mapLocation: mapLocationFrom(input.mapLocation, name),
   };
 }
@@ -523,6 +527,8 @@ function resolveRow(row: ProfileRow, ctx: Context): EmployeeProfile {
     layoutDirection: pick('layoutDirection', ctx.org.layoutDirection),
     address: pick('address', branch?.address || ''),
     postalCode: pick('postalCode', branch?.postalCode),
+    workingHours: pick('workingHours', branch?.workingHours || ''),
+    gallery: ctx.org.gallery || [],
     landline: pick('landline', branch?.landline || ''),
     mapLocation: pick('mapLocation', branch?.mapLocation || mapLocationFrom(undefined, DEFAULT_COORDINATES.title)),
     status: row.status,
@@ -545,6 +551,8 @@ function resolveRow(row: ProfileRow, ctx: Context): EmployeeProfile {
 function toStorage(input: EmployeeProfile, org: Organization, branch: Branch | undefined): Record<string, unknown> {
   const data: Record<string, unknown> = { ...input };
   for (const f of META_FIELDS) delete data[f];
+  delete data.gallery; // always the organisation's
+  delete data.catalogSizeBytes;
   if (!PHYSICAL_CARD_STATUSES.includes(data.physicalCard as PhysicalCardStatus) || data.physicalCard === 'none') delete data.physicalCard;
   if (typeof data.nfcTagSerial === 'string') data.nfcTagSerial = data.nfcTagSerial.trim().slice(0, 64) || undefined;
   else delete data.nfcTagSerial;
@@ -1153,6 +1161,7 @@ export const db = {
       for (const f of ORG_FIELDS) {
         if (f in input) (clean as any)[f] = (input as any)[f];
       }
+      if ('gallery' in input) clean.gallery = input.gallery;
       const next = normalizeOrganization(clean, current);
       writeOrganization(next);
       if (opts.clearOverrides) {
@@ -1949,7 +1958,8 @@ export const db = {
   /** Every /uploads URL that a card, branch or the organisation still uses. */
   referencedUploads(): Set<string> {
     const refs = new Set<string>();
-    const add = (v: unknown) => {
+    const add = (v: unknown): void => {
+      if (Array.isArray(v)) return v.forEach(add);
       if (typeof v === 'string' && v.startsWith('/uploads/')) refs.add(v.split('?')[0]);
     };
     const org = readOrganization();
